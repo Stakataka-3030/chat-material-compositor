@@ -158,7 +158,8 @@ export class AssetStore {
   }
   async thumbnail(id: string, size: number) {
     const asset = this.get(id);
-    if (asset.kind === "sound") throw new Error("音频没有图片预览");
+    if (asset.kind === "sound" || asset.kind === "font")
+      throw new Error("此素材没有图片预览");
     if (!Number.isFinite(size)) throw new Error("预览尺寸无效");
     const dimension = Math.max(64, Math.min(2400, Math.round(size / 64) * 64));
     const folder = path.join(this.locations.data, "tmp", "thumbnails"),
@@ -205,7 +206,25 @@ export class AssetStore {
         mime: string,
         width: number | undefined,
         height: number | undefined;
-      if (kind === "sound") {
+      if (kind === "font") {
+        if (data.length < 12) throw new Error("字体文件无效");
+        const magic = data.subarray(0, 4).toString("latin1");
+        ext =
+          magic === "OTTO"
+            ? "otf"
+            : magic === "wOFF"
+              ? "woff"
+              : magic === "wOF2"
+                ? "woff2"
+                : magic === "ttcf"
+                  ? "ttc"
+                  : data.readUInt32BE(0) === 0x00010000
+                    ? "ttf"
+                    : "";
+        if (!ext || data.length < 12)
+          throw new Error("请选择有效的 TTF、OTF、WOFF、WOFF2 或 TTC 字体");
+        mime = ext === "ttc" ? "font/collection" : `font/${ext}`;
+      } else if (kind === "sound") {
         ext = path.extname(name).slice(1).toLowerCase();
         if (!["wav", "mp3", "ogg", "m4a", "flac", "aac"].includes(ext))
           throw new Error("音频支持 WAV、MP3、OGG、M4A、FLAC 和 AAC");

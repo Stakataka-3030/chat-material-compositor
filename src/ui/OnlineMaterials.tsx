@@ -7,6 +7,11 @@ import {
   type OnlineMaterialPage,
 } from "../core/online-materials.js";
 import { request } from "./api.js";
+import { SourceSettings } from "./SourceSettings.js";
+import {
+  defaultSources,
+  type MaterialSources,
+} from "../core/material-sources.js";
 export function OnlineMaterials({
   kind,
   imported,
@@ -23,6 +28,14 @@ export function OnlineMaterials({
     [url, setUrl] = useState(""),
     [error, setError] = useState("");
   const generation = useRef(0);
+  const [sources, setSources] = useState<MaterialSources>(defaultSources),
+    [settingsOpen, setSettingsOpen] = useState(false);
+  const source = sources.sources.find((s) => s.id === sources.selectedId)!;
+  useEffect(() => {
+    void request<MaterialSources>("/api/materials/sources")
+      .then(setSources)
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     generation.current++;
     setQuery(sourceKeywords[kind] ?? "");
@@ -70,8 +83,8 @@ export function OnlineMaterials({
     <details className="online-materials">
       <summary>在线素材</summary>
       <p>
-        从 Moenotes
-        的公开目录选择素材，按当前分类导入。下载后保存在本机，也可以打包保存。
+        从 {source.name}{" "}
+        的目录选择素材，按当前分类导入。下载后保存在本机，也可以打包保存。
       </p>
       <div className="online-search">
         <input
@@ -93,7 +106,7 @@ export function OnlineMaterials({
           {busy ? "查询中…" : "搜索"}
         </button>
         <a
-          href="https://bdon.moe/tools/asset-viewer"
+          href={source.site || source.url}
           target="_blank"
           rel="noopener noreferrer"
           className="text-button"
@@ -101,6 +114,9 @@ export function OnlineMaterials({
           <ExternalLink size={14} />
           打开来源站
         </a>
+        <button className="text-button" onClick={() => setSettingsOpen(true)}>
+          设置素材源
+        </button>
       </div>
       {error && (
         <p className="error-text" role="alert">
@@ -160,7 +176,7 @@ export function OnlineMaterials({
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="assets.bdon.moe 或 storage.bdon.moe 的图片／音频地址"
+            placeholder="HTTP(S) 图片、音频或字体文件地址"
             aria-label="素材直链"
           />
           <button
@@ -172,6 +188,20 @@ export function OnlineMaterials({
           </button>
         </div>
       </details>
+      {settingsOpen && (
+        <SourceSettings
+          value={sources}
+          close={() => setSettingsOpen(false)}
+          saved={(v) => {
+            generation.current++;
+            setSources(v);
+            setPage(null);
+            setError("");
+            if (v.sources.find((s) => s.id === v.selectedId)?.type === "json")
+              setQuery("");
+          }}
+        />
+      )}
     </details>
   );
 }

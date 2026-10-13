@@ -44,7 +44,7 @@ function open(url) {
   if (process.argv.includes("--no-open")) return;
   const child =
     process.platform === "win32"
-      ? spawn("cmd.exe", ["/d", "/c", "start", "", url], {
+      ? spawn("rundll32.exe", ["url.dll,FileProtocolHandler", url], {
           windowsHide: true,
           stdio: "ignore",
         })

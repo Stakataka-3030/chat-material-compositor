@@ -24,3 +24,9 @@ coverage/
 *.m4a
 *.flac
 *.aac
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.ttc
+*.exe

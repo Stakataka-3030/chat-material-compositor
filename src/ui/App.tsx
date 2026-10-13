@@ -75,6 +75,7 @@ import { ImportGuide } from "./ImportGuide.js";
 import { UpdateNotice } from "./UpdateNotice.js";
 import { MaterialPacks } from "./MaterialPacks.js";
 import { OnlineMaterials } from "./OnlineMaterials.js";
+import { PhoneCustomizer } from "./PhoneCustomizer.js";
 
 type ProjectSummary = {
   id: string;
@@ -97,6 +98,7 @@ const assetLabels: Record<AssetKind, string> = {
   sticker: "贴纸",
   image: "图片",
   sound: "音效",
+  font: "字体",
   icon: "图标",
   mask: "屏幕",
 };
@@ -728,6 +730,10 @@ export function App() {
             s.id === (selectedSpeaker || selectedMessage?.speakerId || p.meId),
         );
         if (speaker) speaker.avatarId = asset.id;
+      });
+    else if (asset.kind === "font")
+      setAppearance({
+        ui: { ...project.appearance.ui, fontAssetId: asset.id },
       });
     else if (asset.kind === "sound") {
       if (selectedMessage) updateMessage({ soundId: asset.id });
@@ -1527,6 +1533,15 @@ export function App() {
                 {pane === "appearance" && (
                   <>
                     <h2>手机外观</h2>
+                    <PhoneCustomizer
+                      appearance={project.appearance}
+                      assets={assets}
+                      change={setAppearance}
+                      refresh={async () =>
+                        setAssets(await request<Asset[]>("/api/assets"))
+                      }
+                      notify={notify}
+                    />
                     <Field label="屏幕高度">
                       <select
                         value={project.appearance.screenHeightRatio ?? 1}
@@ -1751,8 +1766,8 @@ export function App() {
                     <Field label="文字消息字号">
                       <input
                         type="range"
-                        min={12}
-                        max={26}
+                        min={6}
+                        max={60}
                         value={project.appearance.fontSize}
                         onChange={(e) =>
                           setAppearance({ fontSize: Number(e.target.value) })
@@ -2144,7 +2159,13 @@ export function App() {
                       <input
                         hidden
                         type="file"
-                        accept={assetKind === "sound" ? "audio/*" : "image/*"}
+                        accept={
+                          assetKind === "font"
+                            ? ".ttf,.otf,.woff,.woff2,.ttc"
+                            : assetKind === "sound"
+                              ? "audio/*"
+                              : "image/*"
+                        }
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
@@ -2170,6 +2191,7 @@ export function App() {
                         "sticker",
                         "image",
                         "sound",
+                        "font",
                       ] as AssetKind[]
                     ).map((kind) => (
                       <button
@@ -2193,13 +2215,15 @@ export function App() {
                     />
                   </label>
                 </div>
-                <OnlineMaterials
-                  kind={assetKind}
-                  imported={async () =>
-                    setAssets(await request<Asset[]>("/api/assets"))
-                  }
-                  notify={notify}
-                />
+                {assetKind !== "font" && (
+                  <OnlineMaterials
+                    kind={assetKind}
+                    imported={async () =>
+                      setAssets(await request<Asset[]>("/api/assets"))
+                    }
+                    notify={notify}
+                  />
+                )}
                 <div className="asset-grid">
                   {assets
                     .filter(
@@ -2217,7 +2241,9 @@ export function App() {
                         onClick={() => applyAsset(asset)}
                       >
                         <div className="asset-image checker">
-                          {asset.kind === "sound" ? (
+                          {asset.kind === "font" ? (
+                            <FileText size={34} />
+                          ) : asset.kind === "sound" ? (
                             <Volume2 size={34} />
                           ) : (
                             <img

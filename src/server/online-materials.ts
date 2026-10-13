@@ -1,3 +1,11 @@
+import path from "node:path";
+import { DATA } from "./config.js";
+import { readJson, atomicJson } from "./storage.js";
+import {
+  defaultSources,
+  sourcesSchema,
+  type MaterialSources,
+} from "../core/material-sources.js";
 import { networkFetch } from "./network.js";
 import type { AssetKind } from "../core/model.js";
 import {
@@ -6,8 +14,7 @@ import {
   type OnlineMaterialPage,
 } from "../core/online-materials.js";
 import { AssetStore } from "./assets.js";
-const origin = "https://assets.bdon.moe";
-const allowed = new Set([origin, "https://storage.bdon.moe"]);
+
 export function validateMaterialUrl(input: string) {
   let url: URL;
   try {
@@ -15,8 +22,12 @@ export function validateMaterialUrl(input: string) {
   } catch {
     throw new Error("素材链接格式无效");
   }
-  if (!allowed.has(url.origin) || url.username || url.password || url.hash)
-    throw new Error("请使用 assets.bdon.moe 或 storage.bdon.moe 的素材直链");
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password
+  )
+    throw new Error("请使用有效的 HTTP(S) 素材直链");
   return url;
 }
 export class OnlineMaterialService {
@@ -25,19 +36,55 @@ export class OnlineMaterialService {
   constructor(
     private store: AssetStore,
     private fetcher: typeof fetch = networkFetch,
+    private data = DATA,
   ) {}
+  async settings(): Promise<MaterialSources> {
+    return sourcesSchema.parse(
+      await readJson(
+        path.join(this.data, "material-sources.json"),
+        defaultSources,
+      ),
+    );
+  }
+  async saveSettings(input: unknown) {
+    const value = sourcesSchema.parse(input);
+    await atomicJson(path.join(this.data, "material-sources.json"), value);
+    this.snapshot = null;
+    return value;
+  }
+  async resetSettings() {
+    return this.saveSettings(structuredClone(defaultSources));
+  }
   private async json(url: URL) {
     try {
       const response = await this.fetcher(url, {
         signal: AbortSignal.timeout(15000),
-        redirect: "error",
+        redirect: "follow",
         headers: { Accept: "application/json" },
       });
       if (!response.ok)
         throw new Error(`素材目录暂不可用（HTTP ${response.status}）`);
-      const text = await response.text();
-      if (text.length > 2_000_000) throw new Error("素材目录数据过大");
-      return JSON.parse(text);
+      if (!response.body) throw new Error("素材目录为空");
+      const reader = response.body.getReader(),
+        chunks: Uint8Array[] = [];
+      let total = 0;
+      try {
+        for (;;) {
+          const item = await reader.read();
+          if (item.done) break;
+          total += item.value.byteLength;
+          if (total > 2_000_000) {
+            await reader.cancel();
+            throw new Error("素材目录数据过大");
+          }
+          chunks.push(item.value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      return JSON.parse(
+        Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8"),
+      );
     } catch (error) {
       if ((error as Error).name === "TimeoutError")
         throw new Error("素材目录连接超时，请点击搜索重试");
@@ -49,9 +96,56 @@ export class OnlineMaterialService {
     }
   }
   async browse(query: string, offset: number): Promise<OnlineMaterialPage> {
+    const settings = await this.settings(),
+      source = settings.sources.find((s) => s.id === settings.selectedId)!;
+    const origin = source.url.replace(/\/$/, "");
+    if (source.type === "json") {
+      const target = new URL(
+        source.url
+          .replaceAll("{query}", encodeURIComponent(query))
+          .replaceAll("{offset}", String(offset))
+          .replaceAll("{limit}", "40"),
+      );
+      const raw = await this.json(target),
+        list = Array.isArray(raw) ? raw : raw.files;
+      if (!Array.isArray(list)) throw new Error("JSON目录需要 files 数组");
+      const found = list
+        .filter((item) => item && typeof item.url === "string")
+        .map((item) => {
+          const url = validateMaterialUrl(
+            new URL(item.url, source.assetBase || target.href).href,
+          );
+          return {
+            url: url.href,
+            path: String(item.path || item.name || url.pathname),
+            name: String(
+              item.name ||
+                decodeURIComponent(url.pathname.split("/").at(-1) || "素材"),
+            ),
+            kind:
+              item.kind === "sound" ? ("sound" as const) : ("image" as const),
+          };
+        })
+        .filter((item) =>
+          (item.path + item.name).toLowerCase().includes(query.toLowerCase()),
+        );
+      if (source.url.includes("{offset}"))
+        return {
+          files: found,
+          total: Number.isSafeInteger(raw.total) ? raw.total : found.length,
+          nextOffset: Number.isSafeInteger(raw.nextOffset)
+            ? raw.nextOffset
+            : null,
+        };
+      return {
+        files: found.slice(offset, offset + 40),
+        total: found.length,
+        nextOffset: offset + 40 < found.length ? offset + 40 : null,
+      };
+    }
     if (!this.snapshot || Date.now() - this.snapshot.at > 10 * 60 * 1000) {
       const catalogs = await this.json(
-        new URL("/catalogs?region=tw&locale=ja", origin),
+        new URL(origin + "/catalogs?region=tw&locale=ja"),
       );
       if (!Array.isArray(catalogs)) throw new Error("素材目录格式无效");
       const candidates = catalogs.filter(
@@ -61,7 +155,7 @@ export class OnlineMaterialService {
       if (!current) throw new Error("当前没有可用素材目录");
       this.snapshot = { value: current.snapshot, at: Date.now() };
     }
-    const url = new URL("/browse", origin);
+    const url = new URL(origin + "/browse");
     for (const [key, value] of Object.entries({
       snapshot: this.snapshot.value,
       directory: "",
@@ -81,6 +175,10 @@ export class OnlineMaterialService {
     for (const file of page.files) {
       if (typeof file?.path !== "string" || file.path.length > 1200) continue;
       const preview = materialUrl(file.path);
+      if (preview && source.assetBase)
+        preview.url =
+          source.assetBase.replace(/\/$/, "") +
+          new URL(preview.url).pathname.replace(/^\/ja/, "");
       if (!preview) continue;
       files.set(file.path, {
         path: file.path,
@@ -120,11 +218,6 @@ export class OnlineMaterialService {
             ? "此素材尚未在来源站点提供下载"
             : "素材下载失败，请稍后重试",
         );
-      const type = response.headers.get("content-type") ?? "";
-      if (!/^(image\/|audio\/|application\/octet-stream)/i.test(type)) {
-        await response.body?.cancel();
-        throw new Error("请使用图片或音频直链");
-      }
       if (Number(response.headers.get("content-length")) > 64 * 1024 * 1024) {
         await response.body?.cancel();
         throw new Error("素材超过64MB");
@@ -147,23 +240,41 @@ export class OnlineMaterialService {
       } finally {
         reader.releaseLock();
       }
-      const filename = decodeURIComponent(
-        url.pathname.split("/").at(-1) ?? "素材.webp",
+      const content = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+      let filename = decodeURIComponent(
+        url.pathname.split("/").at(-1) || "素材",
       );
+      if (
+        kind === "sound" &&
+        !/\.(wav|mp3|ogg|m4a|flac|aac)$/i.test(filename)
+      ) {
+        const magic = content.subarray(0, 4).toString("latin1"),
+          mime = response.headers.get("content-type") || "";
+        const ext =
+          magic === "RIFF"
+            ? "wav"
+            : magic === "OggS"
+              ? "ogg"
+              : magic === "fLaC"
+                ? "flac"
+                : content.subarray(4, 8).toString() === "ftyp"
+                  ? "m4a"
+                  : mime.includes("aac")
+                    ? "aac"
+                    : "mp3";
+        filename += "." + ext;
+      }
       const display =
-        kind === "sound" ? filename : (name || filename).slice(0, 180);
-      return await this.store.ingest(
-        Buffer.concat(chunks.map((c) => Buffer.from(c))),
-        display,
-        kind,
-        false,
-        ["Moenotes", "在线"],
-        {
-          site: "Moenotes",
-          url: url.href,
-          downloadedAt: new Date().toISOString(),
-        },
-      );
+        kind === "sound"
+          ? name
+            ? name.replace(/\.[a-z0-9]+$/i, "") + path.extname(filename)
+            : filename
+          : (name || filename).slice(0, 180);
+      return await this.store.ingest(content, display, kind, false, ["在线"], {
+        site: url.hostname,
+        url: url.href,
+        downloadedAt: new Date().toISOString(),
+      });
     } catch (error) {
       if ((error as Error).name === "TimeoutError")
         throw new Error("素材下载超时，请重试");

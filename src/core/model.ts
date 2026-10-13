@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { phoneUISchema, type PhoneUI } from "./phone-ui.js";
 
 export const assetKinds = [
   "shell",
@@ -9,6 +10,7 @@ export const assetKinds = [
   "sound",
   "icon",
   "mask",
+  "font",
 ] as const;
 export type AssetKind = (typeof assetKinds)[number];
 export interface Rect {
@@ -91,6 +93,7 @@ export interface StylePlugin {
   };
 }
 export interface Appearance {
+  ui?: Partial<PhoneUI>;
   mode: "single" | "group";
   title: string;
   groupCount: number | null;
@@ -252,6 +255,7 @@ export const projectSchema: z.ZodType<Project> = z
       )
       .max(10000),
     appearance: z.object({
+      ui: phoneUISchema.optional(),
       mode: z.enum(["single", "group"]),
       title: z.string().max(120),
       groupCount: z.number().int().min(2).max(99999).nullable(),
@@ -265,7 +269,7 @@ export const projectSchema: z.ZodType<Project> = z
       showNames: z.boolean(),
       shellColor: color,
       wallpaperFit: z.enum(["cover", "contain"]),
-      fontSize: z.number().min(12).max(26),
+      fontSize: z.number().min(6).max(60),
       statusTime: z.string().max(20),
       battery: z.number().min(0).max(100),
       charging: z.boolean(),
@@ -438,6 +442,9 @@ export function usedAssetIds(project: Project): Set<string> {
   };
   add(project.appearance.shellId);
   add(project.appearance.wallpaperId);
+  Object.entries(project.appearance.ui ?? {}).forEach(([key, value]) => {
+    if (key.endsWith("AssetId")) add(value);
+  });
   add(project.audio.sendSoundId);
   add(project.audio.receiveSoundId);
   project.speakers.forEach((s) => {
@@ -452,7 +459,7 @@ export function usedAssetIds(project: Project): Set<string> {
     Object.values(m.data).forEach((value) => {
       if (
         typeof value === "string" &&
-        /^(shell|wallpaper|avatar|sticker|image|sound|icon|mask)-[a-f0-9]{24}$/.test(
+        /^(shell|wallpaper|avatar|sticker|image|sound|icon|mask|font)-[a-f0-9]{24}$/.test(
           value,
         )
       )

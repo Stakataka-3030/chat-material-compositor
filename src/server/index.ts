@@ -24,6 +24,7 @@ import { UpdateService } from "./updates.js";
 import { APP_VERSION } from "../core/version.js";
 import { OnlineMaterialService } from "./online-materials.js";
 import { exportMaterialPack, importMaterialPack } from "./material-packs.js";
+import { exportPhoneConfig, importPhoneConfig } from "./phone-config.js";
 const app = express(),
   server = http.createServer(app),
   clientToken = randomUUID();
@@ -82,6 +83,9 @@ app.get("/api/bootstrap", async (_req, res) =>
   }),
 );
 app.get("/api/updates", async (_req, res) => res.json(await updates.status()));
+app.get("/api/launcher", (_req, res) =>
+  res.json({ app: "聊天素材合成器", version: APP_VERSION, clientToken }),
+);
 app.post("/api/updates/check", async (req, res) =>
   res.json(
     await updates.check(z.boolean().optional().parse(req.body.force) ?? false),
@@ -114,6 +118,29 @@ app.get("/api/health", async (_req, res) => {
   res.status(ok ? 200 : 503).json({ ok, checks });
 });
 app.get("/api/assets", (_req, res) => res.json(assets.list()));
+app.get("/api/materials/sources", async (_req, res) =>
+  res.json(await onlineMaterials.settings()),
+);
+app.post("/api/materials/sources", async (req, res) =>
+  res.json(await onlineMaterials.saveSettings(req.body)),
+);
+app.post("/api/materials/sources/reset", async (_req, res) =>
+  res.json(await onlineMaterials.resetSettings()),
+);
+app.post("/api/phone-config/export", async (req, res) =>
+  res
+    .type("application/zip")
+    .attachment("phone-config.zip")
+    .send(await exportPhoneConfig(req.body.appearance, assets)),
+);
+app.post(
+  "/api/phone-config/import",
+  projectUpload.single("file"),
+  async (req, res) => {
+    if (!req.file) throw new Error("请选择手机配置包");
+    res.json(await importPhoneConfig(req.file.buffer, assets));
+  },
+);
 app.get("/api/materials/online", async (req, res) =>
   res.json(
     await onlineMaterials.browse(
@@ -158,7 +185,7 @@ app.post(
 );
 app.get("/api/assets/file/:id", async (req, res) => {
   const asset = assets.get(String(req.params.id));
-  if (req.query.size && asset.kind !== "sound") {
+  if (req.query.size && asset.kind !== "sound" && asset.kind !== "font") {
     const file = await assets.thumbnail(asset.id, Number(req.query.size));
     res
       .type("image/webp")

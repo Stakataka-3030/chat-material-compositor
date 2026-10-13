@@ -12,7 +12,7 @@ async function add(folder = "") {
     const name = folder ? folder + "/" + entry.name : entry.name;
     if (
       entry.isDirectory() &&
-      ["src", "web", "scripts", "examples"].some(
+      ["src", "web", "scripts", "examples", "launcher"].some(
         (root) => name === root || name.startsWith(root + "/"),
       )
     )
@@ -28,7 +28,7 @@ await add();
 const output = path.resolve(
   ROOT,
   "..",
-  "聊天素材合成器-" + APP_VERSION + "-源码.zip",
+  "chat-material-compositor-" + APP_VERSION + "-source.zip",
 );
 await fs.writeFile(output, zip.toBuffer());
 console.log(path.basename(output));

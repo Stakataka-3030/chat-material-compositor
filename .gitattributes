@@ -22,3 +22,9 @@
 *.m4a export-ignore
 *.flac export-ignore
 *.aac export-ignore
+*.ttf export-ignore
+*.otf export-ignore
+*.woff export-ignore
+*.woff2 export-ignore
+*.ttc export-ignore
+*.exe export-ignore

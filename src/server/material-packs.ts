@@ -11,7 +11,9 @@ const maxBytes = 256 * 1024 * 1024;
 const itemSchema = z.object({
   id: z
     .string()
-    .regex(/^(shell|wallpaper|avatar|sticker|image|sound|icon)-[a-f0-9]{24}$/),
+    .regex(
+      /^(shell|wallpaper|avatar|sticker|image|sound|icon|font)-[a-f0-9]{24}$/,
+    ),
   name: z.string().min(1).max(180),
   kind: z.enum([
     "shell",
@@ -21,6 +23,7 @@ const itemSchema = z.object({
     "image",
     "sound",
     "icon",
+    "font",
   ]),
   entry: z.string().regex(/^files\/[a-z0-9.-]+$/i),
   bytes: z
@@ -32,7 +35,16 @@ const itemSchema = z.object({
   source: z
     .object({
       site: z.string().max(80),
-      url: z.httpUrl().max(2000),
+      url: z
+        .string()
+        .max(2000)
+        .refine((value) => {
+          try {
+            return ["http:", "https:"].includes(new URL(value).protocol);
+          } catch {
+            return false;
+          }
+        }, "素材来源地址无效"),
       downloadedAt: z.string().max(80),
     })
     .optional(),

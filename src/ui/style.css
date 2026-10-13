@@ -1588,3 +1588,51 @@ progress {
 .online-direct .online-search {
   margin-top: 10px;
 }
+.phone-customizer {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.phone-customizer > p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 10px 0;
+}
+.phone-customizer details {
+  margin: 14px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.phone-customizer summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.phone-customizer .field {
+  margin: 12px 0;
+}
+.phone-config-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.phone-config-actions .button {
+  font-size: 12px;
+  padding: 8px;
+}
+.color-auto {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.color-auto input {
+  flex: 1;
+  min-width: 0;
+}
+.phone-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}

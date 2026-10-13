@@ -9,8 +9,6 @@ const rootFiles = new Set([
   ".gitignore",
   ".gitattributes",
   ".puppeteerrc.cjs",
-  "启动.bat",
-  "停止.bat",
 ]);
 export function isPublishableFile(file: string) {
   const name = file.replaceAll("\\", "/");
@@ -18,9 +16,11 @@ export function isPublishableFile(file: string) {
     return rootFiles.has(name);
   if (rootFiles.has(name)) return true;
   if (/^(src|web)\//.test(name)) return /\.(ts|tsx|css|html)$/.test(name);
+  if (name === "launcher/Program.cs") return true;
   return [
     "scripts/launcher.mjs",
     "scripts/package-delivery.ts",
+    "scripts/build-portable.mjs",
     "examples/order.style.json",
   ].includes(name);
 }
