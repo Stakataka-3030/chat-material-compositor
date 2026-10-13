@@ -1,0 +1,42 @@
+{
+  "id": "order-card",
+  "version": "1.0.0",
+  "name": "订单",
+  "description": "带金额和状态的订单卡片",
+  "icon": "file",
+  "enabled": true,
+  "fields": [
+    {
+      "key": "title",
+      "label": "商品",
+      "type": "text",
+      "default": "两杯柠檬茶",
+      "required": true
+    },
+    { "key": "amount", "label": "金额", "type": "text", "default": "¥ 24.00" },
+    {
+      "key": "status",
+      "label": "状态",
+      "type": "select",
+      "default": "已下单",
+      "options": ["已下单", "配送中", "已完成"]
+    }
+  ],
+  "layout": {
+    "variant": "card",
+    "width": 240,
+    "nodes": [
+      { "type": "text", "text": "{{title}}", "size": 17, "bold": true },
+      { "type": "space", "height": 6 },
+      {
+        "type": "text",
+        "text": "{{amount}}",
+        "size": 23,
+        "bold": true,
+        "color": "$accent"
+      },
+      { "type": "line" },
+      { "type": "text", "text": "{{status}}", "size": 12, "color": "$muted" }
+    ]
+  }
+}
