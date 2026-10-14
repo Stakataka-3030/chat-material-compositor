@@ -31,7 +31,7 @@ export function validateMaterialUrl(input: string) {
   return url;
 }
 export class OnlineMaterialService {
-  private snapshot: { value: string; at: number } | null = null;
+  private snapshot: { value: string; at: number; key: string } | null = null;
   private imports = 0;
   constructor(
     private store: AssetStore,
@@ -39,12 +39,33 @@ export class OnlineMaterialService {
     private data = DATA,
   ) {}
   async settings(): Promise<MaterialSources> {
-    return sourcesSchema.parse(
+    const settings = sourcesSchema.parse(
       await readJson(
         path.join(this.data, "material-sources.json"),
         defaultSources,
       ),
     );
+    let migrated = false;
+    settings.sources = settings.sources.map((source) => {
+      if (
+        source.id === "moenotes" &&
+        source.url === "https://assets.bdon.moe" &&
+        source.assetBase === "https://assets.bdon.moe/ja" &&
+        !source.locale
+      ) {
+        migrated = true;
+        return {
+          ...source,
+          region: "tw",
+          locale: "zh-Hans" as const,
+          assetBase: "https://assets.bdon.moe/zh-Hans",
+        };
+      }
+      return source;
+    });
+    if (migrated)
+      await atomicJson(path.join(this.data, "material-sources.json"), settings);
+    return settings;
   }
   async saveSettings(input: unknown) {
     const value = sourcesSchema.parse(input);
@@ -143,9 +164,22 @@ export class OnlineMaterialService {
         nextOffset: offset + 40 < found.length ? offset + 40 : null,
       };
     }
-    if (!this.snapshot || Date.now() - this.snapshot.at > 10 * 60 * 1000) {
+    const region = source.region || "tw",
+      locale = source.locale || "zh-Hans",
+      key = origin + "/" + region + "/" + locale;
+    if (
+      !this.snapshot ||
+      this.snapshot.key !== key ||
+      Date.now() - this.snapshot.at > 10 * 60 * 1000
+    ) {
       const catalogs = await this.json(
-        new URL(origin + "/catalogs?region=tw&locale=ja"),
+        new URL(
+          origin +
+            "/catalogs?region=" +
+            encodeURIComponent(region) +
+            "&locale=" +
+            encodeURIComponent(locale),
+        ),
       );
       if (!Array.isArray(catalogs)) throw new Error("素材目录格式无效");
       const candidates = catalogs.filter(
@@ -153,11 +187,12 @@ export class OnlineMaterialService {
       );
       const current = candidates.find((c) => c.current) ?? candidates[0];
       if (!current) throw new Error("当前没有可用素材目录");
-      this.snapshot = { value: current.snapshot, at: Date.now() };
+      this.snapshot = { value: current.snapshot, at: Date.now(), key };
     }
+    const snapshot = this.snapshot.value;
     const url = new URL(origin + "/browse");
     for (const [key, value] of Object.entries({
-      snapshot: this.snapshot.value,
+      snapshot,
       directory: "",
       query,
       offset: String(offset),
@@ -167,18 +202,18 @@ export class OnlineMaterialService {
     const page = await this.json(url);
     if (
       !Array.isArray(page.files) ||
-      page.snapshot !== this.snapshot.value ||
+      page.snapshot !== snapshot ||
       !Number.isSafeInteger(page.total)
     )
       throw new Error("素材目录格式无效");
     const files = new Map<string, OnlineMaterialPage["files"][number]>();
     for (const file of page.files) {
       if (typeof file?.path !== "string" || file.path.length > 1200) continue;
-      const preview = materialUrl(file.path);
-      if (preview && source.assetBase)
-        preview.url =
-          source.assetBase.replace(/\/$/, "") +
-          new URL(preview.url).pathname.replace(/^\/ja/, "");
+      const preview = materialUrl(
+        file.path,
+        source.assetBase ||
+          origin + (region === "tw" ? "" : "/" + region) + "/" + locale,
+      );
       if (!preview) continue;
       files.set(file.path, {
         path: file.path,

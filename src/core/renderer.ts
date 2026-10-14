@@ -16,6 +16,7 @@ import {
 } from "./timeline.js";
 
 import { resolvePhoneUI, type PhoneUI } from "./phone-ui.js";
+import { parseTextCSS, textFont, type TextStyle } from "./text-css.js";
 const FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif';
 interface Theme {
   face: string;
@@ -55,6 +56,7 @@ interface NodeBox {
   height: number;
   lines?: string[];
   baselines?: number[];
+  textStyle?: TextStyle;
   children?: NodeBox[];
 }
 interface Block {
@@ -121,6 +123,7 @@ export class ChatRenderer {
   private ui: PhoneUI;
   private nativeScreen = { y: 0, height: 0 };
   private embeddedFont = "";
+  private embeddedStatusFont = "";
   private contentHeight = 0;
   private screenCanvas = document.createElement("canvas");
   private layerCanvas = document.createElement("canvas");
@@ -163,11 +166,12 @@ export class ChatRenderer {
       };
     } else if (project.appearance.showShell)
       this.geometry = {
-        frameW: 413,
-        frameH: 860,
-        nativeFrameH: 860,
-        screenX: 19,
-        screenY: 25,
+        frameW: 375 + this.ui.shellPaddingX * 2,
+        frameH: 812 + this.ui.shellPaddingTop + this.ui.shellPaddingBottom,
+        nativeFrameH:
+          812 + this.ui.shellPaddingTop + this.ui.shellPaddingBottom,
+        screenX: this.ui.shellPaddingX,
+        screenY: this.ui.shellPaddingTop,
         screenW: 375,
         screenH: 812,
         shell: null,
@@ -213,16 +217,18 @@ export class ChatRenderer {
       );
   }
   async prepare() {
-    if (this.ui.fontAssetId) {
-      this.embeddedFont = "chat-" + this.ui.fontAssetId;
+    for (const [key, id] of [
+      ["embeddedFont", this.ui.fontAssetId],
+      ["embeddedStatusFont", this.ui.statusFontAssetId],
+    ] as const) {
+      if (!id) continue;
+      const family = "chat-" + id;
+      this[key] = family;
       if (
-        !document.fonts.check(`12px "${this.embeddedFont}"`) ||
-        ![...document.fonts].some((f) => f.family === this.embeddedFont)
+        !document.fonts.check(`12px "${family}"`) ||
+        ![...document.fonts].some((f) => f.family === family)
       ) {
-        const face = new FontFace(
-          this.embeddedFont,
-          `url("${this.url(this.ui.fontAssetId)}")`,
-        );
+        const face = new FontFace(family, `url("${this.url(id)}")`);
         try {
           await face.load();
           document.fonts.add(face);
@@ -356,9 +362,16 @@ export class ChatRenderer {
   private font(size: number, bold = false) {
     return `${bold ? this.ui.boldWeight : this.ui.fontWeight} ${size}px ${this.embeddedFont ? '"' + this.embeddedFont + '", ' : ""}${this.ui.fontFamily || FONT}`;
   }
-  private wrap(text: string, width: number, size: number, bold = false) {
+  private wrap(
+    text: string,
+    width: number,
+    size: number,
+    bold = false,
+    style?: TextStyle,
+  ) {
     const ctx = this.measure;
-    ctx.font = this.font(size, bold);
+    ctx.font = style ? textFont(style) : this.font(size, bold);
+    ctx.letterSpacing = (style?.spacing || 0) + "px";
     const segmenter = new Intl.Segmenter("zh", { granularity: "grapheme" });
     const result: string[] = [];
     for (const paragraph of text.split("\n")) {
@@ -408,12 +421,43 @@ export class ChatRenderer {
     const limit = Math.min(width, node.width ?? width),
       gap = node.gap ?? 5;
     if (node.type === "text") {
-      const text = interpolate(node.text ?? "", data);
+      let text = interpolate(node.text ?? "", data);
       if (!text) return { node, x: 0, y: 0, width: 0, height: 0, lines: [] };
-      const size = node.size ?? this.project.appearance.fontSize,
-        lines = this.wrap(text, limit, size, node.bold),
-        lineHeight = size * this.ui.lineHeight;
-      this.measure.font = this.font(size, node.bold);
+      const baseSize = node.size ?? this.project.appearance.fontSize;
+      const defaults: TextStyle = {
+        size: baseSize,
+        weight: node.bold ? this.ui.boldWeight : this.ui.fontWeight,
+        family:
+          (this.embeddedFont ? '"' + this.embeddedFont + '", ' : "") +
+          (this.ui.fontFamily || FONT),
+        italic: false,
+        lineHeight: baseSize * this.ui.lineHeight,
+        spacing: 0,
+        align:
+          node.align === "center"
+            ? "center"
+            : node.align === "end"
+              ? "right"
+              : "left",
+        decoration: "",
+        opacity: 1,
+        transform: "",
+        shadows: [],
+      };
+      const textStyle = parseTextCSS(
+        this.ui.messageCSS + ";" + interpolate(node.css ?? "", data),
+        defaults,
+      );
+      if (textStyle.transform === "uppercase") text = text.toLocaleUpperCase();
+      else if (textStyle.transform === "lowercase")
+        text = text.toLocaleLowerCase();
+      else if (textStyle.transform === "capitalize")
+        text = text.replace(/(^|\s)\S/g, (v) => v.toLocaleUpperCase());
+      const size = textStyle.size,
+        lines = this.wrap(text, limit, size, node.bold, textStyle),
+        lineHeight = textStyle.lineHeight;
+      this.measure.font = textFont(textStyle);
+      this.measure.letterSpacing = textStyle.spacing + "px";
       const metrics = lines.map((line) => this.measure.measureText(line));
       return {
         node,
@@ -424,6 +468,7 @@ export class ChatRenderer {
           : Math.min(limit, Math.max(...metrics.map((m) => m.width), 1)),
         height: lines.length * lineHeight,
         lines,
+        textStyle,
         baselines: metrics.map(
           (m, i) =>
             i * lineHeight +
@@ -515,6 +560,12 @@ export class ChatRenderer {
       children,
     };
   }
+  private avatarVisible(own: boolean) {
+    return (
+      this.ui.avatarVisible &&
+      (own ? this.ui.outgoingAvatarVisible : this.ui.incomingAvatarVisible)
+    );
+  }
   private buildBlocks() {
     let y = this.ui.chatTopPadding;
     this.blocks = this.project.messages.map((message) => {
@@ -524,7 +575,7 @@ export class ChatRenderer {
       const available =
         this.chatBox().width -
         this.ui.messageMargin * 2 -
-        (this.ui.avatarVisible ? this.ui.avatarSize + this.ui.avatarGap : 0);
+        (this.avatarVisible(own) ? this.ui.avatarSize + this.ui.avatarGap : 0);
       const width = Math.max(
         20,
         Math.min(
@@ -557,7 +608,9 @@ export class ChatRenderer {
           ? 0
           : this.ui.bubblePaddingY * 2);
       const nameHeight =
-        !separator && this.project.appearance.showNames
+        !separator &&
+        this.project.appearance.showNames &&
+        (own ? this.ui.outgoingNameVisible : this.ui.incomingNameVisible)
           ? this.ui.nameHeight
           : 0;
       const bodyWidth =
@@ -574,7 +627,7 @@ export class ChatRenderer {
             );
       const height =
         Math.max(
-          separator ? 28 : this.ui.avatarVisible ? this.ui.avatarSize : 0,
+          separator ? 28 : this.avatarVisible(own) ? this.ui.avatarSize : 0,
           bodyHeight + nameHeight,
         ) + this.ui.messageGap;
       const block = {
@@ -668,42 +721,75 @@ export class ChatRenderer {
     y += box.y;
     if (!box.height) return;
     if (node.type === "text") {
-      const size = node.size ?? this.project.appearance.fontSize;
-      ctx.font = this.font(size, node.bold);
-      ctx.fillStyle = this.color(
-        node.color ? interpolate(node.color, block.message.data) : undefined,
-        block.own,
-      );
-      ctx.textAlign =
-        node.align === "center"
-          ? "center"
-          : node.align === "end"
-            ? "right"
-            : "left";
+      const style = box.textStyle!,
+        size = style.size;
+      ctx.save();
+      ctx.font = textFont(style);
+      ctx.letterSpacing = style.spacing + "px";
+      ctx.fillStyle =
+        style.color ||
+        this.color(
+          node.color ? interpolate(node.color, block.message.data) : undefined,
+          block.own,
+        );
+      ctx.textAlign = style.align;
       ctx.textBaseline = "alphabetic";
-      const textX =
+      ctx.globalAlpha *= style.opacity;
+      const anchor =
         x +
-        (node.align === "center"
+        (style.align === "center"
           ? box.width / 2
-          : node.align === "end"
+          : ["right", "end"].includes(style.align)
             ? box.width
             : 0);
       box.lines?.forEach((line, i) => {
         const metrics = ctx.measureText(line),
-          inkX =
-            block.plugin.layout.variant === "separator"
-              ? x +
-                (box.width -
-                  metrics.actualBoundingBoxRight +
-                  metrics.actualBoundingBoxLeft) /
-                  2
-              : textX;
-        ctx.fillText(
-          line,
-          inkX,
-          y + (box.baselines?.[i] ?? (i + 1) * size * this.ui.lineHeight),
-        );
+          centered = block.plugin.layout.variant === "separator";
+        const inkX = centered
+          ? x +
+            (box.width -
+              metrics.actualBoundingBoxRight +
+              metrics.actualBoundingBoxLeft) /
+              2
+          : anchor;
+        const baseline = y + (box.baselines?.[i] ?? (i + 1) * style.lineHeight);
+        if (centered) ctx.textAlign = "left";
+        const scale = Math.abs(ctx.getTransform().a) || 1;
+        const shadow = style.shadows[0];
+        if (shadow) {
+          ctx.shadowColor = shadow.color;
+          ctx.shadowBlur = shadow.blur * scale;
+          ctx.shadowOffsetX = shadow.x * scale;
+          ctx.shadowOffsetY = shadow.y * scale;
+        }
+        ctx.fillText(line, inkX, baseline);
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        const left = centered
+          ? inkX
+          : style.align === "center"
+            ? anchor - metrics.width / 2
+            : ["right", "end"].includes(style.align)
+              ? anchor - metrics.width
+              : anchor;
+        ctx.strokeStyle = style.decorationColor || ctx.fillStyle;
+        ctx.lineWidth = Math.max(0.7, size / 20);
+        for (const [name, dy] of [
+          ["underline", Math.max(2, size * 0.1)],
+          ["line-through", -size * 0.3],
+          ["overline", -metrics.actualBoundingBoxAscent],
+        ] as const)
+          if (style.decoration.includes(name)) {
+            ctx.beginPath();
+            ctx.moveTo(left, baseline + dy);
+            ctx.lineTo(left + metrics.width, baseline + dy);
+            ctx.stroke();
+          }
+        ctx.textAlign = style.align;
       });
+      ctx.restore();
     } else if (node.type === "image") {
       const image = this.images.get(
         String(block.message.data[node.asset ?? ""] ?? ""),
@@ -780,14 +866,17 @@ export class ChatRenderer {
       status = u.statusVisible ? u.statusHeight : 0,
       header = u.headerVisible ? u.headerHeight : 0,
       footer = u.footerVisible ? u.footerHeight : 0,
+      navigation = u.navigationMode !== "none" ? u.navigationHeight : 0,
       factor = Math.min(
         1,
-        (height * 0.78) / Math.max(1, status + header + footer),
+        (height * 0.78) / Math.max(1, status + header + footer + navigation),
       );
     return {
       status: status * factor,
       header: header * factor,
       footer: footer * factor,
+      navigation: navigation * factor,
+      bottom: (footer + navigation) * factor,
       top: (status + header) * factor,
     };
   }
@@ -831,6 +920,11 @@ export class ChatRenderer {
       smile:
         "M22 12A10 10 0 1 0 2 12A10 10 0 1 0 22 12 M8 9V10 M16 9V10 M7 15Q12 20 17 15",
       more: "M5 12h.1 M12 12h.1 M19 12h.1",
+      "more-vertical": "M12 5h.1 M12 12h.1 M12 19h.1",
+      voice: "M4 10Q8 12 4 14 M9 7Q16 12 9 17 M15 3Q25 12 15 21",
+      video: "M2 5H15V19H2Z M15 9L22 5V19L15 15",
+      send: "M2 3L22 12L2 21L6 12Z M6 12H22",
+      search: "M17 10A7 7 0 1 0 3 10A7 7 0 1 0 17 10 M15 15L22 22",
     };
     const path = new Path2D(paths[name] ?? paths.more!);
     if (style === "filled") ctx.fill(path);
@@ -918,7 +1012,7 @@ export class ChatRenderer {
         size = Math.min(u.statusFontSize, Math.max(6, b.status - 4));
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
-      ctx.font = this.font(size);
+      ctx.font = `${u.statusFontWeight} ${size}px ${this.embeddedStatusFont ? '"' + this.embeddedStatusFont + '", ' : ""}${u.statusFontFamily}`;
       ctx.textBaseline = "middle";
       ctx.textAlign = "left";
       let x = 18;
@@ -932,10 +1026,10 @@ export class ChatRenderer {
         x += 55;
       }
       for (const [role, name, visible] of [
-        ["statusSignal", "signal", u.signalVisible],
-        ["statusWifi", "wifi", u.wifiVisible],
-        ["statusClock", "clock", u.clockVisible],
-        ["statusLocation", "location", u.locationVisible],
+        ["statusSignal", u.statusSignalSymbol, u.signalVisible],
+        ["statusWifi", u.statusWifiSymbol, u.wifiVisible],
+        ["statusClock", u.statusClockSymbol, u.clockVisible],
+        ["statusLocation", u.statusLocationSymbol, u.locationVisible],
       ] as const) {
         if (visible) {
           this.positionedIcon(ctx, role, name, x + 8, cy, 17, color);
@@ -970,11 +1064,12 @@ export class ChatRenderer {
         }
         ctx.fillStyle = p.color;
         ctx.textAlign = "right";
-        ctx.fillText(
-          this.project.appearance.battery + "%",
-          p.x - p.size / 2 - 4,
-          p.y,
-        );
+        if (u.batteryPercentVisible)
+          ctx.fillText(
+            this.project.appearance.battery + "%",
+            p.x - p.size / 2 - 4,
+            p.y,
+          );
         if (this.project.appearance.charging) {
           ctx.textAlign = "center";
           ctx.fillText("ϟ", p.x, p.y);
@@ -1050,7 +1145,10 @@ export class ChatRenderer {
       h = this.bars(height).footer;
     if (!h) return;
     ctx.save();
-    ctx.translate(u.footerX, u.footerY < 0 ? height - h : u.footerY);
+    ctx.translate(
+      u.footerX,
+      u.footerY < 0 ? height - this.bars(height).navigation - h : u.footerY,
+    );
     width = u.footerWidth > 0 ? u.footerWidth : width;
     const cy = h / 2,
       size = Math.min(u.footerIconSize, Math.max(6, h - 6));
@@ -1129,8 +1227,8 @@ export class ChatRenderer {
       y,
       width: Math.max(10, u.chatWidth),
       height: all
-        ? Math.max(this.contentHeight, height - y - b.footer)
-        : Math.max(1, u.chatHeight < 0 ? height - y - b.footer : u.chatHeight),
+        ? Math.max(this.contentHeight, height - y - b.bottom)
+        : Math.max(1, u.chatHeight < 0 ? height - y - b.bottom : u.chatHeight),
     };
   }
   private scroll(atMs: number, chatHeight: number) {
@@ -1196,7 +1294,9 @@ export class ChatRenderer {
       const margin = this.ui.messageMargin,
         offset =
           margin +
-          (this.ui.avatarVisible ? this.ui.avatarSize + this.ui.avatarGap : 0);
+          (this.avatarVisible(block.own)
+            ? this.ui.avatarSize + this.ui.avatarGap
+            : 0);
       const avatarX = block.own ? width - margin - this.ui.avatarSize : margin;
       const x = separator
         ? (width - block.width) / 2
@@ -1219,7 +1319,7 @@ export class ChatRenderer {
       ctx.scale(scale, scale);
       ctx.translate(-anchorX, -anchorY);
       if (!separator) {
-        if (this.ui.avatarVisible)
+        if (this.avatarVisible(block.own))
           this.avatar(ctx, block.message.speakerId, avatarX, y);
         if (block.nameHeight) {
           ctx.font = this.font(this.ui.nameSize);
@@ -1339,6 +1439,84 @@ export class ChatRenderer {
     ctx.restore();
     this.header(ctx, outerWidth, height);
     this.footer(ctx, outerWidth, height);
+    this.systemOverlay(ctx, outerWidth, height);
+  }
+
+  private systemOverlay(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ) {
+    const u = this.ui,
+      nav = this.bars(height).navigation;
+    ctx.save();
+    if (nav > 0) {
+      rect(
+        ctx,
+        0,
+        height - nav,
+        width,
+        nav,
+        0,
+        u.navigationBackground || u.footerBackground || this.theme.bar,
+      );
+      const color = u.navigationColor || this.theme.text,
+        cy = height - nav / 2;
+      if (u.navigationMode === "gesture")
+        rect(
+          ctx,
+          (width - u.navigationWidth) / 2,
+          cy - u.navigationThickness / 2,
+          u.navigationWidth,
+          u.navigationThickness,
+          u.navigationThickness / 2,
+          color,
+        );
+      else {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(width * 0.25 + 5, cy - 6);
+        ctx.lineTo(width * 0.25 - 5, cy);
+        ctx.lineTo(width * 0.25 + 5, cy + 6);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(width / 2, cy, 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeRect(width * 0.75 - 5, cy - 5, 10, 10);
+      }
+    }
+    if (u.cameraType !== "none" && u.cameraWidth > 0 && u.cameraHeight > 0) {
+      const x = u.cameraX < 0 ? width / 2 : u.cameraX,
+        y = u.cameraY;
+      ctx.globalAlpha *= u.cameraOpacity;
+      ctx.fillStyle = u.cameraColor || "#151515";
+      if (u.cameraType === "hole") {
+        ctx.beginPath();
+        ctx.ellipse(
+          x,
+          y,
+          u.cameraWidth / 2,
+          u.cameraHeight / 2,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      } else
+        rect(
+          ctx,
+          x - u.cameraWidth / 2,
+          y - u.cameraHeight / 2,
+          u.cameraWidth,
+          u.cameraHeight,
+          u.cameraRadius,
+          u.cameraColor || "#151515",
+        );
+    }
+    ctx.restore();
   }
   render(
     canvas: HTMLCanvasElement,
@@ -1457,9 +1635,9 @@ export class ChatRenderer {
     const screenH = shell
       ? Math.max(
           g.screenH,
-          this.contentHeight + this.bars().top + this.bars().footer,
+          this.contentHeight + this.bars().top + this.bars().bottom,
         )
-      : this.contentHeight + this.bars().top + this.bars().footer;
+      : this.contentHeight + this.bars().top + this.bars().bottom;
     return {
       width,
       height: Math.ceil(
@@ -1564,7 +1742,7 @@ export class ChatRenderer {
     else {
       const screenH = Math.max(
           g.screenH,
-          this.contentHeight + this.bars().top + this.bars().footer,
+          this.contentHeight + this.bars().top + this.bars().bottom,
         ),
         frameH = g.frameH + screenH - g.screenH;
       ctx.translate(18, 18);

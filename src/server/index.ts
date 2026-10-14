@@ -25,6 +25,7 @@ import { APP_VERSION } from "../core/version.js";
 import { OnlineMaterialService } from "./online-materials.js";
 import { exportMaterialPack, importMaterialPack } from "./material-packs.js";
 import { exportPhoneConfig, importPhoneConfig } from "./phone-config.js";
+import { appearancePresets } from "../core/appearance-presets.js";
 const app = express(),
   server = http.createServer(app),
   clientToken = randomUUID();
@@ -127,18 +128,28 @@ app.post("/api/materials/sources", async (req, res) =>
 app.post("/api/materials/sources/reset", async (_req, res) =>
   res.json(await onlineMaterials.resetSettings()),
 );
+app.get("/api/phone-config/presets/:id", async (req, res) => {
+  const preset = appearancePresets.find((p) => p.id === req.params.id);
+  if (!preset) return res.status(404).json({ error: "找不到内置配置" });
+  const value = { ...newProject().appearance, ...preset.appearance };
+  const zip = await exportPhoneConfig(value, assets, preset.scope);
+  res
+    .type("application/zip")
+    .attachment(preset.name + ".zip")
+    .send(zip);
+});
 app.post("/api/phone-config/export", async (req, res) =>
   res
     .type("application/zip")
     .attachment("phone-config.zip")
-    .send(await exportPhoneConfig(req.body.appearance, assets)),
+    .send(await exportPhoneConfig(req.body.appearance, assets, req.body.scope)),
 );
 app.post(
   "/api/phone-config/import",
   projectUpload.single("file"),
   async (req, res) => {
     if (!req.file) throw new Error("请选择手机配置包");
-    res.json(await importPhoneConfig(req.file.buffer, assets));
+    res.json(await importPhoneConfig(req.file.buffer, assets, req.body.scope));
   },
 );
 app.get("/api/materials/online", async (req, res) =>

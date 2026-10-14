@@ -12,9 +12,10 @@ const itemSchema = z.object({
   id: z
     .string()
     .regex(
-      /^(shell|wallpaper|avatar|sticker|image|sound|icon|font)-[a-f0-9]{24}$/,
+      /^(shell|wallpaper|avatar|sticker|image|sound|icon|font|bar-background)-[a-f0-9]{24}$/,
     ),
   name: z.string().min(1).max(180),
+  category: z.enum(["icon", "bar-background"]).optional(),
   kind: z.enum([
     "shell",
     "wallpaper",
@@ -24,6 +25,7 @@ const itemSchema = z.object({
     "sound",
     "icon",
     "font",
+    "bar-background",
   ]),
   entry: z.string().regex(/^files\/[a-z0-9.-]+$/i),
   bytes: z
@@ -73,6 +75,7 @@ export async function exportMaterialPack(
     bytes: a.bytes,
     tags: a.tags,
     source: a.source,
+    category: a.category,
   }));
   response.type("application/zip").attachment("聊天素材合成器-素材包.zip");
   const archive = archiver("zip", { store: true });
@@ -154,6 +157,7 @@ export async function importMaterialPack(
         false,
         asset.tags,
         asset.source,
+        asset.category,
       );
     }
     const added = new Set(await store.absorb(staged));

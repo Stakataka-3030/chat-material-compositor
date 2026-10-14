@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Upload, Download } from "lucide-react";
 import type { Asset, AssetKind } from "../core/model.js";
+import { assetCategory } from "../core/asset-names.js";
 import { Modal, Field } from "./components.js";
 import { request, download } from "./api.js";
 export function MaterialPacks({
@@ -12,13 +13,13 @@ export function MaterialPacks({
   assets: Asset[];
   kind: AssetKind;
   imported: () => Promise<void>;
-  notify: (message: string) => void;
+  notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
   const [open, setOpen] = useState(false),
     [scope, setScope] = useState<"category" | "all">("category"),
     [busy, setBusy] = useState(false);
   const chosen = assets.filter(
-    (a) => a.kind !== "mask" && (scope === "all" || a.kind === kind),
+    (a) => a.kind !== "mask" && (scope === "all" || assetCategory(a) === kind),
   );
   async function importPack(file: File) {
     setBusy(true);
@@ -34,7 +35,7 @@ export function MaterialPacks({
         `已导入 ${result.imported} 个素材${result.existing ? `，${result.existing} 个已在库中` : ""}`,
       );
     } catch (e) {
-      notify((e as Error).message);
+      notify((e as Error).message, "error");
     } finally {
       setBusy(false);
     }
@@ -42,7 +43,7 @@ export function MaterialPacks({
   return (
     <>
       <label className={"button secondary " + (busy ? "disabled" : "")}>
-        <Upload size={16} />
+        <Download size={16} />
         导入素材包
         <input
           type="file"
@@ -61,7 +62,7 @@ export function MaterialPacks({
         disabled={busy}
         onClick={() => setOpen(true)}
       >
-        <Download size={16} />
+        <Upload size={16} />
         导出素材包
       </button>
       {open && (
@@ -96,7 +97,7 @@ export function MaterialPacks({
                     setOpen(false);
                     notify("素材包已导出");
                   })
-                  .catch((e) => notify(e.message))
+                  .catch((e) => notify(e.message, "error"))
                   .finally(() => setBusy(false));
               }}
             >

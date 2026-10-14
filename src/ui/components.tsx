@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import type { Asset, AssetKind } from "../core/model.js";
+import { assetName, assetCategory } from "../core/asset-names.js";
 const icons: Record<string, typeof MessageSquare> = {
   message: MessageSquare,
   image: Image,
@@ -147,11 +148,19 @@ export function AssetSelect({
       onChange={(e) => onChange(e.target.value || null)}
     >
       <option value="">{empty}</option>
+      {value &&
+        assets.find(
+          (a) => a.id === value && !kinds.includes(assetCategory(a)),
+        ) && (
+          <option value={value}>
+            原配置：{assetName(assets.find((a) => a.id === value)!)}
+          </option>
+        )}
       {assets
-        .filter((a) => kinds.includes(a.kind))
+        .filter((a) => kinds.includes(assetCategory(a)))
         .map((a) => (
           <option key={a.id} value={a.id}>
-            {a.name}
+            {assetName(a)}
           </option>
         ))}
     </select>

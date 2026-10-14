@@ -32,6 +32,8 @@ import {
   Search,
   X,
   Check,
+  CircleAlert,
+  Info,
   Settings2,
   Users,
   ChevronUp,
@@ -76,6 +78,8 @@ import { UpdateNotice } from "./UpdateNotice.js";
 import { MaterialPacks } from "./MaterialPacks.js";
 import { OnlineMaterials } from "./OnlineMaterials.js";
 import { PhoneCustomizer } from "./PhoneCustomizer.js";
+import { assetName, assetCategory } from "../core/asset-names.js";
+import { TextCSSInput } from "./TextCSSInput.js";
 
 type ProjectSummary = {
   id: string;
@@ -100,6 +104,7 @@ const assetLabels: Record<AssetKind, string> = {
   sound: "音效",
   font: "字体",
   icon: "图标",
+  "bar-background": "栏背景",
   mask: "屏幕",
 };
 const snapshotKey = (p: Project) =>
@@ -122,7 +127,10 @@ export function App() {
       "message",
     );
   const [saveState, setSaveState] = useState("正在打开"),
-    [toast, setToast] = useState(""),
+    [toast, setToast] = useState<{
+      message: string;
+      tone: "success" | "error" | "info";
+    } | null>(null),
     [playing, setPlaying] = useState(false),
     [atMs, setAtMs] = useState(0),
     [zoom, setZoom] = useState(1),
@@ -151,6 +159,7 @@ export function App() {
     [deleteRole, setDeleteRole] = useState<string | null>(null),
     [replacementRole, setReplacementRole] = useState(""),
     [multi, setMulti] = useState<string[]>([]);
+  const [assetPreview, setAssetPreview] = useState<Asset | null>(null);
   const history = useRef(new History<Project>()),
     current = useRef<Project | null>(null),
     saved = useRef(""),
@@ -180,12 +189,18 @@ export function App() {
       } catch {}
     }
   }, []);
-  const notify = useCallback((message: string) => {
-    setToast(message);
-  }, []);
+  const notify = useCallback(
+    (message: string, tone: "success" | "error" | "info" = "success") => {
+      setToast({ message, tone });
+    },
+    [],
+  );
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(""), 4200);
+    const timer = setTimeout(
+      () => setToast(null),
+      toast.tone === "error" ? 6500 : 4200,
+    );
     return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
@@ -210,7 +225,7 @@ export function App() {
         setSaveState("已保存");
         setBoot(true);
       })
-      .catch((e) => notify(e.message));
+      .catch((e) => notify(e.message, "error"));
     const events = new EventSource("/api/events");
     events.onmessage = (e) => {
       const job = JSON.parse(e.data) as ExportJob;
@@ -253,7 +268,7 @@ export function App() {
         }
       } catch (e) {
         setSaveState("保存失败");
-        notify((e as Error).message);
+        notify((e as Error).message, "error");
       } finally {
         saving.current = false;
       }
@@ -457,7 +472,7 @@ export function App() {
           }
         }
       } catch (e) {
-        notify(`音效准备未完成：${(e as Error).message}`);
+        notify(`音效准备未完成：${(e as Error).message}`, "error");
       }
     }
     if (generation !== playGeneration.current) return;
@@ -491,7 +506,7 @@ export function App() {
   const addMessage = (kind = "text") => {
     if (!project) return;
     if (plugins.find((p) => p.id === kind)?.enabled === false) {
-      notify("请先在样式页启用该消息类型");
+      notify("请先在样式页启用该消息类型", "info");
       return;
     }
     const plugin = registry.get(kind),
@@ -670,7 +685,7 @@ export function App() {
       await openProject(p.id);
       setModal(null);
     } catch (e) {
-      notify((e as Error).message);
+      notify((e as Error).message, "error");
     } finally {
       setBusy(false);
     }
@@ -698,7 +713,7 @@ export function App() {
         }
       });
     } catch (e) {
-      notify((e as Error).message);
+      notify((e as Error).message, "error");
     } finally {
       setBusy(false);
     }
@@ -712,7 +727,7 @@ export function App() {
       setModal(null);
       notify("已加入导出队列");
     } catch (e) {
-      notify((e as Error).message);
+      notify((e as Error).message, "error");
     } finally {
       setBusy(false);
     }
@@ -758,7 +773,7 @@ export function App() {
     try {
       parsed = parseBulk(bulkText, project, registry.get("text"));
     } catch (e) {
-      notify((e as Error).message);
+      notify((e as Error).message, "error");
       return;
     }
     change((p) => {
@@ -781,7 +796,7 @@ export function App() {
         <div className="brand-mark">
           <MessageSquare size={22} />
         </div>
-        <p>{toast || "正在打开工作台…"}</p>
+        <p>{toast?.message || "正在打开工作台…"}</p>
       </div>
     );
   return (
@@ -838,7 +853,7 @@ export function App() {
               });
             }}
           >
-            <Download size={15} />
+            <Upload size={15} />
             保存工程包
           </button>
           <button className="button primary" onClick={() => setModal("export")}>
@@ -1307,7 +1322,21 @@ export function App() {
                         .get(selectedMessage.kind)
                         .fields.map((field) => (
                           <Field key={field.key} label={field.label}>
-                            {field.type === "asset" ? (
+                            {field.key === "css" ? (
+                              <TextCSSInput
+                                value={String(
+                                  selectedMessage.data[field.key] ?? "",
+                                )}
+                                change={(value) =>
+                                  updateMessage({
+                                    data: {
+                                      ...selectedMessage.data,
+                                      [field.key]: value,
+                                    },
+                                  })
+                                }
+                              />
+                            ) : field.type === "asset" ? (
                               <div className="asset-field">
                                 <AssetSelect
                                   assets={assets}
@@ -1343,7 +1372,7 @@ export function App() {
                                   empty="选择素材"
                                 />
                                 <label className="upload-mini">
-                                  <Upload size={15} />
+                                  <Download size={15} />
                                   <input
                                     type="file"
                                     accept={
@@ -1532,7 +1561,7 @@ export function App() {
                   ))}
                 {pane === "appearance" && (
                   <>
-                    <h2>手机外观</h2>
+                    <h2>界面外观</h2>
                     <PhoneCustomizer
                       appearance={project.appearance}
                       assets={assets}
@@ -1542,43 +1571,6 @@ export function App() {
                       }
                       notify={notify}
                     />
-                    <Field label="屏幕高度">
-                      <select
-                        value={project.appearance.screenHeightRatio ?? 1}
-                        onChange={(e) =>
-                          setAppearance({
-                            screenHeightRatio: Number(e.target.value),
-                          })
-                        }
-                      >
-                        <option value={1}>全高 · 100%</option>
-                        <option value={0.75}>四分之三 · 75%</option>
-                        <option value={0.5}>半高 · 50%</option>
-                        {![1, 0.75, 0.5].includes(
-                          project.appearance.screenHeightRatio ?? 1,
-                        ) && (
-                          <option value={project.appearance.screenHeightRatio}>
-                            {Math.round(
-                              (project.appearance.screenHeightRatio ?? 1) * 100,
-                            )}
-                            %
-                          </option>
-                        )}
-                      </select>
-                      <input
-                        aria-label="自定义屏幕高度"
-                        type="range"
-                        min={0.35}
-                        max={1}
-                        step={0.01}
-                        value={project.appearance.screenHeightRatio ?? 1}
-                        onChange={(e) =>
-                          setAppearance({
-                            screenHeightRatio: Number(e.target.value),
-                          })
-                        }
-                      />
-                    </Field>
                     <Field label="聊天方式">
                       <select
                         value={project.appearance.mode}
@@ -1617,163 +1609,6 @@ export function App() {
                         />
                       </Field>
                     )}
-                    <Field label="手机皮肤">
-                      <AssetSelect
-                        assets={assets}
-                        kind="shell"
-                        value={project.appearance.shellId}
-                        onChange={(id) => setAppearance({ shellId: id })}
-                        empty="通用手机"
-                      />
-                    </Field>
-                    {!project.appearance.shellId && (
-                      <Field label="通用外壳颜色">
-                        <input
-                          type="color"
-                          value={project.appearance.shellColor}
-                          onChange={(e) =>
-                            setAppearance({ shellColor: e.target.value })
-                          }
-                        />
-                      </Field>
-                    )}
-                    <Field label="聊天背景">
-                      <AssetSelect
-                        assets={assets}
-                        kind="wallpaper"
-                        value={project.appearance.wallpaperId}
-                        onChange={(id) => setAppearance({ wallpaperId: id })}
-                      />
-                    </Field>
-                    <div className="check-group">
-                      <label className="check-row">
-                        <input
-                          type="checkbox"
-                          checked={project.appearance.showShell}
-                          onChange={(e) =>
-                            setAppearance({ showShell: e.target.checked })
-                          }
-                        />
-                        显示手机外壳
-                      </label>
-                      <label className="check-row">
-                        <input
-                          type="checkbox"
-                          checked={project.appearance.theme === "dark"}
-                          onChange={(e) =>
-                            setAppearance({
-                              theme: e.target.checked ? "dark" : "light",
-                            })
-                          }
-                        />
-                        深色聊天界面
-                      </label>
-                      <label className="check-row">
-                        <input
-                          type="checkbox"
-                          checked={project.appearance.showRead}
-                          onChange={(e) =>
-                            setAppearance({ showRead: e.target.checked })
-                          }
-                        />
-                        显示已读状态
-                      </label>
-                      <label className="check-row">
-                        <input
-                          type="checkbox"
-                          checked={project.appearance.showNames}
-                          onChange={(e) =>
-                            setAppearance({ showNames: e.target.checked })
-                          }
-                        />
-                        显示发送者昵称
-                      </label>
-                    </div>
-                    <div className="field-pair">
-                      <Field label="状态栏时间">
-                        <input
-                          value={project.appearance.statusTime}
-                          onChange={(e) =>
-                            setAppearance({ statusTime: e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="电量 %">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={project.appearance.battery}
-                          onChange={(e) =>
-                            setAppearance({
-                              battery: Math.max(
-                                0,
-                                Math.min(100, Number(e.target.value)),
-                              ),
-                            })
-                          }
-                        />
-                      </Field>
-                    </div>
-                    <label className="check-row">
-                      <input
-                        type="checkbox"
-                        checked={project.appearance.showStatusTime ?? false}
-                        onChange={(e) =>
-                          setAppearance({ showStatusTime: e.target.checked })
-                        }
-                      />
-                      状态栏显示时间
-                    </label>
-                    <label className="check-row">
-                      <input
-                        type="checkbox"
-                        checked={project.appearance.charging}
-                        onChange={(e) =>
-                          setAppearance({ charging: e.target.checked })
-                        }
-                      />
-                      充电状态
-                    </label>
-                    <Field label="昵称颜色">
-                      <input
-                        type="color"
-                        value={project.appearance.nameColor || "#ffffff"}
-                        onChange={(e) =>
-                          setAppearance({ nameColor: e.target.value })
-                        }
-                      />
-                      <button
-                        className="text-button"
-                        onClick={() => setAppearance({ nameColor: null })}
-                      >
-                        自动选择颜色
-                      </button>
-                    </Field>
-                    <Field label="背景适配">
-                      <select
-                        value={project.appearance.wallpaperFit}
-                        onChange={(e) =>
-                          setAppearance({
-                            wallpaperFit: e.target.value as "cover" | "contain",
-                          })
-                        }
-                      >
-                        <option value="cover">填满屏幕</option>
-                        <option value="contain">显示完整图片</option>
-                      </select>
-                    </Field>
-                    <Field label="文字消息字号">
-                      <input
-                        type="range"
-                        min={6}
-                        max={60}
-                        value={project.appearance.fontSize}
-                        onChange={(e) =>
-                          setAppearance({ fontSize: Number(e.target.value) })
-                        }
-                      />
-                    </Field>
                     <details>
                       <summary>位置与变换</summary>
                       <label className="check-row">
@@ -2154,7 +1989,7 @@ export function App() {
                       notify={notify}
                     />
                     <label className="button primary">
-                      <Upload size={16} />
+                      <Download size={16} />
                       导入素材
                       <input
                         hidden
@@ -2172,7 +2007,7 @@ export function App() {
                             setBusy(true);
                             void importAsset(file, assetKind)
                               .then(() => notify("素材已导入"))
-                              .catch((e) => notify(e.message))
+                              .catch((e) => notify(e.message, "error"))
                               .finally(() => setBusy(false));
                           }
                           e.target.value = "";
@@ -2190,6 +2025,8 @@ export function App() {
                         "avatar",
                         "sticker",
                         "image",
+                        "icon",
+                        "bar-background",
                         "sound",
                         "font",
                       ] as AssetKind[]
@@ -2228,7 +2065,7 @@ export function App() {
                   {assets
                     .filter(
                       (a) =>
-                        a.kind === assetKind &&
+                        assetCategory(a) === assetKind &&
                         (a.name + a.tags.join(" ")).includes(search),
                     )
                     .map((asset) => (
@@ -2238,7 +2075,13 @@ export function App() {
                           (asset.kind === "shell" ? "shell" : "")
                         }
                         key={asset.id}
-                        onClick={() => applyAsset(asset)}
+                        onClick={() =>
+                          ["icon", "bar-background"].includes(
+                            assetCategory(asset),
+                          )
+                            ? setAssetPreview(asset)
+                            : applyAsset(asset)
+                        }
                       >
                         <div className="asset-image checker">
                           {asset.kind === "font" ? (
@@ -2252,7 +2095,7 @@ export function App() {
                             />
                           )}
                         </div>
-                        <strong>{asset.name}</strong>
+                        <strong>{assetName(asset)}</strong>
                         <small>
                           {asset.width
                             ? `${asset.width} × ${asset.height}`
@@ -2264,10 +2107,20 @@ export function App() {
                             className="text-button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              applyAsset(asset);
+                              if (
+                                ["icon", "bar-background"].includes(
+                                  assetCategory(asset),
+                                )
+                              )
+                                setAssetPreview(asset);
+                              else applyAsset(asset);
                             }}
                           >
-                            使用
+                            {["icon", "bar-background"].includes(
+                              assetCategory(asset),
+                            )
+                              ? "预览"
+                              : "使用"}
                           </button>
                           {["avatar", "wallpaper", "image", "sticker"].includes(
                             asset.kind,
@@ -2298,7 +2151,7 @@ export function App() {
                     <p>启用常用样式，也可以安装新的消息卡片。</p>
                   </div>
                   <label className="button primary">
-                    <Upload size={16} />
+                    <Download size={16} />
                     导入配置
                     <input
                       hidden
@@ -2320,7 +2173,7 @@ export function App() {
                               setPlugins(p);
                               notify("样式已安装");
                             })
-                            .catch((e) => notify(e.message));
+                            .catch((e) => notify(e.message, "error"));
                         e.target.value = "";
                       }}
                     />
@@ -2360,7 +2213,7 @@ export function App() {
                               },
                             )
                               .then(setPlugins)
-                              .catch((e) => notify(e.message));
+                              .catch((e) => notify(e.message, "error"));
                           }}
                         />
                         <span />
@@ -2380,7 +2233,7 @@ export function App() {
                   </div>
                   <div className="page-actions">
                     <label className="button secondary">
-                      <Upload size={16} />
+                      <Download size={16} />
                       打开工程包
                       <input
                         hidden
@@ -2396,7 +2249,7 @@ export function App() {
                               body,
                             })
                               .then((p) => openProject(p.id))
-                              .catch((e) => notify(e.message));
+                              .catch((e) => notify(e.message, "error"));
                           }
                           e.target.value = "";
                         }}
@@ -2424,7 +2277,9 @@ export function App() {
                       className="project-tile"
                       key={p.id}
                       onClick={() =>
-                        void openProject(p.id).catch((e) => notify(e.message))
+                        void openProject(p.id).catch((e) =>
+                          notify(e.message, "error"),
+                        )
                       }
                     >
                       <div className="project-art">
@@ -2463,9 +2318,18 @@ export function App() {
         </div>
       )}
       {toast && (
-        <div className="toast" role="status">
-          <Check size={16} />
-          {toast}
+        <div
+          className={"toast toast-" + toast.tone}
+          role={toast.tone === "error" ? "alert" : "status"}
+        >
+          {toast.tone === "error" ? (
+            <CircleAlert size={16} />
+          ) : toast.tone === "info" ? (
+            <Info size={16} />
+          ) : (
+            <Check size={16} />
+          )}
+          {toast.message}
         </div>
       )}
       {(modal === "new" || modal === "rename") && (
@@ -2557,6 +2421,23 @@ export function App() {
               删除角色
             </button>
           </footer>
+        </Modal>
+      )}
+      {assetPreview && (
+        <Modal
+          title={assetName(assetPreview)}
+          close={() => setAssetPreview(null)}
+        >
+          <div className="asset-preview checker">
+            <img
+              src={`/api/assets/file/${assetPreview.id}?size=1200`}
+              alt={assetName(assetPreview)}
+            />
+          </div>
+          <p>
+            {assetLabels[assetCategory(assetPreview)]} · {assetPreview.width}×
+            {assetPreview.height}
+          </p>
         </Modal>
       )}
       {cropTarget && (
@@ -2737,7 +2618,7 @@ export function App() {
                           void post(
                             "/api/jobs/" + job.id + "/cancel",
                             {},
-                          ).catch((e) => notify(e.message));
+                          ).catch((e) => notify(e.message, "error"));
                         }}
                       >
                         取消
@@ -2756,7 +2637,7 @@ export function App() {
                           {},
                         )
                           .then((value) => setJobs((old) => [value, ...old]))
-                          .catch((e) => notify(e.message));
+                          .catch((e) => notify(e.message, "error"));
                       }}
                     >
                       重新导出
@@ -2765,7 +2646,7 @@ export function App() {
                   <div className="artifact-links">
                     {job.artifacts.map((a) => (
                       <a key={a.name} href={a.url} download>
-                        <Download size={13} />
+                        <Upload size={13} />
                         {formatLabels[a.format]}
                         <small>{size(a.size)}</small>
                       </a>

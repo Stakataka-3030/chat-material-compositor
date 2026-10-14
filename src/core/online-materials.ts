@@ -28,8 +28,13 @@ export const sourceKeywords: Partial<Record<AssetKind, string>> = {
   avatar: "icon",
   sticker: "stamp",
   sound: "Cri/Sound/SE",
+  icon: "Adv/Chat/UI",
+  "bar-background": "Adv/Chat/UI",
 };
-export function materialUrl(filePath: string) {
+export function materialUrl(
+  filePath: string,
+  base = "https://assets.bdon.moe/zh-Hans",
+) {
   const relative = filePath
     .replaceAll("\\", "/")
     .replace(/^\/+/, "")
@@ -43,8 +48,9 @@ export function materialUrl(filePath: string) {
     return {
       kind: "image" as const,
       url:
-        "https://assets.bdon.moe/" +
-        ["ja", ...key.split("/"), key.split("/").at(-1)! + ".webp"]
+        base.replace(/\/$/, "") +
+        "/" +
+        [...key.split("/"), key.split("/").at(-1)! + ".webp"]
           .map(encodeURIComponent)
           .join("/"),
     };
@@ -54,8 +60,9 @@ export function materialUrl(filePath: string) {
     return {
       kind: "sound" as const,
       url:
-        "https://assets.bdon.moe/" +
-        ["ja", ...key.split("/"), key.split("/").at(-1)! + ".m4a"]
+        base.replace(/\/$/, "") +
+        "/" +
+        [...key.split("/"), key.split("/").at(-1)! + ".m4a"]
           .map(encodeURIComponent)
           .join("/"),
     };

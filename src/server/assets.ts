@@ -196,6 +196,7 @@ export class AssetStore {
     builtin = false,
     tags: string[] = [],
     source?: Asset["source"],
+    category?: Asset["category"],
   ): Promise<Asset> {
     return this.writer.run(async () => {
       const hash = digest(data),
@@ -265,6 +266,7 @@ export class AssetStore {
         tags,
         builtin,
         ...(source ? { source } : {}),
+        ...(category ? { category } : {}),
       };
       if (kind === "sound") {
         try {

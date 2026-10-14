@@ -1617,6 +1617,10 @@ progress {
   gap: 8px;
   flex-wrap: wrap;
 }
+.builtin-config-downloads .text-button {
+  display: block;
+  margin: 6px 0;
+}
 .phone-config-actions .button {
   font-size: 12px;
   padding: 8px;
@@ -1635,4 +1639,55 @@ progress {
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+.online-thumbnail {
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.online-thumbnail img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.online-pages {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+.online-pages span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.online-results audio {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.asset-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  margin-bottom: 14px;
+}
+.asset-preview img {
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+}
+
+.toast-error {
+  background: #962f38;
+  box-shadow: 0 6px 20px #962f3829;
+}
+.toast-info {
+  background: #455464;
+}
+.toast svg {
+  flex-shrink: 0;
 }

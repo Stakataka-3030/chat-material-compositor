@@ -219,6 +219,8 @@ export class ProjectStore {
         a.kind,
         false,
         a.tags,
+        a.source,
+        a.category,
       );
       if (imported.id !== a.id)
         throw new Error(`素材标识与文件不一致：${a.name}`);

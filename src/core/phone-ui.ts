@@ -67,10 +67,40 @@ export const phoneDefaults = {
   statusTimeY: -1,
 
   frameRatio: 0,
+  shellPaddingX: 19,
+  shellPaddingTop: 25,
+  shellPaddingBottom: 23,
+  cameraType: "none",
+  cameraX: -1,
+  cameraY: 18,
+  cameraWidth: 12,
+  cameraHeight: 12,
+  cameraRadius: 8,
+  cameraColor: "",
+  cameraOpacity: 1,
+  navigationMode: "none",
+  navigationHeight: 22,
+  navigationWidth: 110,
+  navigationThickness: 4,
+  navigationColor: "",
+  navigationBackground: "",
+  statusFontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+  statusFontAssetId: null as string | null,
+  statusFontWeight: 400,
+  statusSignalSymbol: "signal",
+  statusWifiSymbol: "wifi",
+  statusClockSymbol: "clock",
+  statusLocationSymbol: "location",
+  batteryPercentVisible: true,
+  incomingAvatarVisible: true,
+  outgoingAvatarVisible: true,
+  incomingNameVisible: true,
+  outgoingNameVisible: true,
   shellRadius: 45,
   screenRadius: 34,
   fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
   fontAssetId: null as string | null,
+  messageCSS: "",
   fontWeight: 400,
   boldWeight: 600,
   lineHeight: 1.45,
@@ -142,6 +172,12 @@ export const phoneDefaults = {
 };
 export type PhoneUI = Omit<
   typeof phoneDefaults,
+  | "cameraType"
+  | "navigationMode"
+  | "statusSignalSymbol"
+  | "statusWifiSymbol"
+  | "statusClockSymbol"
+  | "statusLocationSymbol"
   | "titleAlign"
   | "headerLeftAssetId"
   | "headerRight1AssetId"
@@ -152,6 +188,12 @@ export type PhoneUI = Omit<
   | "footerRight1AssetId"
   | "footerRight2AssetId"
 > & {
+  cameraType: "none" | "hole" | "island" | "notch";
+  navigationMode: "none" | "gesture" | "buttons";
+  statusSignalSymbol: string;
+  statusWifiSymbol: string;
+  statusClockSymbol: string;
+  statusLocationSymbol: string;
   titleAlign: "left" | "center" | "right";
   headerLeftAssetId: string | null;
   headerRight1AssetId: string | null;
@@ -173,6 +215,15 @@ export const iconNames = [
   "smile",
   "mic",
   "more",
+  "more-vertical",
+  "voice",
+  "video",
+  "send",
+  "search",
+  "signal",
+  "wifi",
+  "clock",
+  "location",
 ];
 export const iconLabels = [
   "不显示",
@@ -185,6 +236,15 @@ export const iconLabels = [
   "表情",
   "麦克风",
   "更多",
+  "更多（竖向）",
+  "语音切换",
+  "视频通话",
+  "发送",
+  "搜索",
+  "信号",
+  "Wi-Fi",
+  "时钟",
+  "定位",
 ];
 export const phoneGroups: {
   title: string;
@@ -197,6 +257,9 @@ export const phoneGroups: {
       ["frameRatio", "手机宽高比（0跟随皮肤）"],
       ["shellRadius", "通用外壳圆角"],
       ["screenRadius", "通用屏幕圆角"],
+      ["shellPaddingX", "通用外壳左右边框"],
+      ["shellPaddingTop", "通用外壳上边框"],
+      ["shellPaddingBottom", "通用外壳下边框"],
     ],
   },
   {
@@ -207,6 +270,7 @@ export const phoneGroups: {
       ["fontWeight", "正文字重"],
       ["boldWeight", "粗体字重"],
       ["lineHeight", "正文行距倍数"],
+      ["messageCSS", "正文CSS"],
     ],
   },
   {
@@ -215,11 +279,15 @@ export const phoneGroups: {
       ["statusVisible", "显示状态栏"],
       ["statusHeight", "状态栏高度"],
       ["statusFontSize", "状态文字大小"],
-      ["signalVisible", "信号"],
-      ["wifiVisible", "Wi-Fi"],
-      ["clockVisible", "时钟图标"],
-      ["locationVisible", "定位图标"],
-      ["batteryVisible", "电池"],
+      ["statusFontFamily", "状态栏字体列表"],
+      ["statusFontAssetId", "状态栏本机字体"],
+      ["statusFontWeight", "状态栏字重"],
+      ["batteryPercentVisible", "显示电量百分比"],
+      ["signalVisible", "显示左一（默认：信号）"],
+      ["wifiVisible", "显示左二（默认：Wi-Fi）"],
+      ["clockVisible", "显示左三（默认：时钟）"],
+      ["locationVisible", "显示左四（默认：定位）"],
+      ["batteryVisible", "显示右一（默认：电池）"],
       ["statusBackground", "背景颜色"],
       ["statusColor", "文字和图标颜色"],
       ["batteryColor", "电量颜色"],
@@ -249,6 +317,10 @@ export const phoneGroups: {
     title: "消息布局",
     fields: [
       ["avatarVisible", "显示头像"],
+      ["incomingAvatarVisible", "显示对方头像"],
+      ["outgoingAvatarVisible", "显示我方头像"],
+      ["incomingNameVisible", "显示对方昵称"],
+      ["outgoingNameVisible", "显示我方昵称"],
       ["avatarSize", "头像大小"],
       ["avatarRadius", "头像圆角"],
       ["avatarGap", "头像与气泡间距"],
@@ -310,6 +382,13 @@ export const phoneGroups: {
 ];
 export const phoneRanges: Record<string, [number, number, number]> = {
   frameRatio: [0, 2.5, 0.01],
+  shellPaddingX: [0, 80, 1],
+  shellPaddingTop: [0, 100, 1],
+  shellPaddingBottom: [0, 100, 1],
+  cameraOpacity: [0, 1, 0.05],
+  navigationHeight: [0, 100, 1],
+  statusFontWeight: [100, 900, 100],
+  navigationThickness: [1, 20, 1],
   fontWeight: [100, 900, 100],
   boldWeight: [100, 900, 100],
   lineHeight: [1, 2.5, 0.05],
@@ -343,11 +422,11 @@ export const phoneRanges: Record<string, [number, number, number]> = {
   separatorOpacity: [0, 1, 0.05],
 };
 const iconTitles: Record<IconRole, string> = {
-  statusSignal: "信号",
-  statusWifi: "Wi-Fi",
-  statusClock: "时钟",
-  statusLocation: "定位",
-  statusBattery: "电池",
+  statusSignal: "左一（默认：信号）",
+  statusWifi: "左二（默认：Wi-Fi）",
+  statusClock: "左三（默认：时钟）",
+  statusLocation: "左四（默认：定位）",
+  statusBattery: "右一（默认：电池）",
   headerLeft: "顶栏左图标",
   headerRight1: "顶栏右图标1",
   headerRight2: "顶栏右图标2",
@@ -417,6 +496,43 @@ const moreFields: Record<string, [keyof PhoneUI, string][]> = {
     ["chatHeight", "消息区高度（-1自动）"],
   ],
 };
+phoneGroups.push(
+  {
+    title: "摄像头与挖孔",
+    fields: [
+      ["cameraType", "形状"],
+      ["cameraX", "X（-1居中）"],
+      ["cameraY", "Y"],
+      ["cameraWidth", "宽度"],
+      ["cameraHeight", "高度"],
+      ["cameraRadius", "圆角"],
+      ["cameraColor", "颜色"],
+      ["cameraOpacity", "透明度"],
+    ],
+  },
+  {
+    title: "系统导航栏",
+    fields: [
+      ["navigationMode", "显示方式"],
+      ["navigationHeight", "高度"],
+      ["navigationWidth", "手势条宽度"],
+      ["navigationThickness", "手势条粗细"],
+      ["navigationColor", "图标颜色"],
+      ["navigationBackground", "背景颜色"],
+    ],
+  },
+);
+for (const role of [
+  "statusSignal",
+  "statusWifi",
+  "statusClock",
+  "statusLocation",
+] as const) {
+  const group = phoneGroups.find(
+    (g) => g.parent === "状态栏" && g.title.startsWith(iconTitles[role]),
+  );
+  group?.fields.unshift([(role + "Symbol") as keyof PhoneUI, "内置图标"]);
+}
 for (const group of phoneGroups)
   group.fields.push(...(moreFields[group.title] ?? []));
 
@@ -441,19 +557,26 @@ for (const [key, value] of Object.entries(phoneDefaults)) {
     schema = z
       .string()
       .regex(
-        key === "fontAssetId"
+        /FontAssetId$/i.test(key)
           ? /^font-[a-f0-9]{24}$/
-          : /^(icon|image|sticker)-[a-f0-9]{24}$/,
+          : /^(icon|image|sticker|bar-background|wallpaper)-[a-f0-9]{24}$/,
       )
       .nullable();
   else if (typeof value === "number") {
     const r = phoneRanges[key]!;
     schema = z.number().finite().min(r[0]).max(r[1]);
   } else if (typeof value === "boolean") schema = z.boolean();
+  else if (key === "cameraType")
+    schema = z.enum(["none", "hole", "island", "notch"]);
+  else if (key === "navigationMode")
+    schema = z.enum(["none", "gesture", "buttons"]);
+  else if (key.endsWith("Symbol"))
+    schema = z.enum(iconNames as [string, ...string[]]);
   else if (key === "titleAlign") schema = z.enum(["left", "center", "right"]);
   else if (/^header(Left|Right\d)$|^footer(Left|Right)\d$/.test(key))
     schema = z.enum(iconNames as [string, ...string[]]);
   else if (key.endsWith("Style")) schema = z.enum(["outline", "filled"]);
+  else if (key === "messageCSS") schema = z.string().max(4000);
   else if (value === "" && !["inputText"].includes(key))
     schema = z.string().regex(/^$|^#[\da-fA-F]{6}([\da-fA-F]{2})?$/);
   else

@@ -25,10 +25,21 @@ const define = (
   layout,
 });
 export const builtinPlugins: StylePlugin[] = [
-  define("text", "文字", "message", [field("text", "内容", "multiline", "")], {
-    variant: "bubble",
-    nodes: [{ type: "text", text: "{{text}}", color: "$text" }],
-  }),
+  define(
+    "text",
+    "文字",
+    "message",
+    [
+      field("text", "内容", "multiline", ""),
+      field("css", "文字CSS", "multiline", ""),
+    ],
+    {
+      variant: "bubble",
+      nodes: [
+        { type: "text", text: "{{text}}", color: "$text", css: "{{css}}" },
+      ],
+    },
+  ),
   define(
     "image",
     "图片",

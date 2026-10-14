@@ -80,6 +80,12 @@ export function ImportGuide({
               text、image、row、column、space、line、wave；行和列的子项放在
               children 中。图片节点的 asset 填素材字段的 key，例如 imageAsset。
             </p>
+            <p>
+              文字节点可加 <code>css</code>，例如{" "}
+              <code>{'"css": "color: #d34b72; font-weight: 700;"'}</code>
+              ，也可写 <code>{'"css": "{{css}}"'}</code> 并在 fields 中添加 css
+              编辑项。支持字体、颜色、行距、字距、对齐、装饰线、单个阴影和透明度。
+            </p>
             <details>
               <summary>查看通知卡片的完整配置</summary>
               <pre>{JSON.stringify(example, null, 2)}</pre>

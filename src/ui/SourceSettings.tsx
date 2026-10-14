@@ -101,6 +101,57 @@ export function SourceSettings({
           <option value="json">JSON素材目录</option>
         </select>
       </Field>
+      {current.type === "moenotes" && (
+        <>
+          <Field label="目录地区">
+            <select
+              value={current.region || "tw"}
+              onChange={(e) => {
+                const region = e.target.value,
+                  locale = current.locale || "zh-Hans";
+                patch({
+                  region,
+                  assetBase:
+                    current.url.replace(/\/$/, "") +
+                    (region === "tw" ? "" : "/" + region) +
+                    "/" +
+                    locale,
+                });
+              }}
+            >
+              <option value="tw">台服资源库</option>
+              <option value="jp">日服资源库</option>
+              <option value="en">国际服资源库</option>
+              <option value="kr">韩服资源库</option>
+            </select>
+          </Field>
+          <Field label="素材语言">
+            <select
+              value={current.locale || "zh-Hans"}
+              onChange={(e) => {
+                const locale = e.target.value as NonNullable<
+                    typeof current.locale
+                  >,
+                  region = current.region || "tw";
+                patch({
+                  locale,
+                  assetBase:
+                    current.url.replace(/\/$/, "") +
+                    (region === "tw" ? "" : "/" + region) +
+                    "/" +
+                    locale,
+                });
+              }}
+            >
+              <option value="zh-Hans">简体中文</option>
+              <option value="zh-Hant">繁体中文</option>
+              <option value="ja">日文</option>
+              <option value="en">英文</option>
+              <option value="ko">韩文</option>
+            </select>
+          </Field>
+        </>
+      )}
       <Field
         label={current.type === "json" ? "JSON目录地址" : "目录接口根地址"}
       >

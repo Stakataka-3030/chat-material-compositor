@@ -6,6 +6,11 @@ export const sourceSchema = z.object({
   url: z.string().min(1).max(2000),
   assetBase: z.string().max(2000).optional(),
   site: z.string().max(2000).optional(),
+  region: z
+    .string()
+    .regex(/^[a-z]{2,8}$/)
+    .optional(),
+  locale: z.enum(["zh-Hans", "zh-Hant", "ja", "en", "ko"]).optional(),
 });
 export const sourcesSchema = z
   .object({
@@ -50,7 +55,9 @@ export const defaultSources: MaterialSources = {
       name: "Moenotes",
       type: "moenotes",
       url: "https://assets.bdon.moe",
-      assetBase: "https://assets.bdon.moe/ja",
+      assetBase: "https://assets.bdon.moe/zh-Hans",
+      region: "tw",
+      locale: "zh-Hans",
       site: "https://bdon.moe/tools/asset-viewer",
     },
   ],

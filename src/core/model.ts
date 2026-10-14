@@ -11,6 +11,7 @@ export const assetKinds = [
   "icon",
   "mask",
   "font",
+  "bar-background",
 ] as const;
 export type AssetKind = (typeof assetKinds)[number];
 export interface Rect {
@@ -23,6 +24,7 @@ export interface Asset {
   id: string;
   name: string;
   kind: AssetKind;
+  category?: "icon" | "bar-background";
   file: string;
   mime: string;
   width?: number;
@@ -65,6 +67,7 @@ export interface PluginField {
 export interface LayoutNode {
   type: "text" | "image" | "column" | "row" | "space" | "line" | "wave";
   text?: string;
+  css?: string;
   asset?: string;
   children?: LayoutNode[];
   size?: number;
@@ -172,6 +175,7 @@ const nodeSchema: z.ZodType<LayoutNode> = z.lazy(() =>
   z.object({
     type: z.enum(["text", "image", "column", "row", "space", "line", "wave"]),
     text: z.string().max(10000).optional(),
+    css: z.string().max(4000).optional(),
     asset: z.string().max(120).optional(),
     children: z.array(nodeSchema).max(40).optional(),
     size: z.number().min(6).max(80).optional(),
@@ -459,7 +463,7 @@ export function usedAssetIds(project: Project): Set<string> {
     Object.values(m.data).forEach((value) => {
       if (
         typeof value === "string" &&
-        /^(shell|wallpaper|avatar|sticker|image|sound|icon|mask|font)-[a-f0-9]{24}$/.test(
+        /^(shell|wallpaper|avatar|sticker|image|sound|icon|mask|font|bar-background)-[a-f0-9]{24}$/.test(
           value,
         )
       )

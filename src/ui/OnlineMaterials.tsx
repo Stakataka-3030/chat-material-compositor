@@ -12,6 +12,25 @@ import {
   defaultSources,
   type MaterialSources,
 } from "../core/material-sources.js";
+function MaterialThumbnail({ item }: { item: OnlineMaterial }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="online-thumbnail checker">
+      {failed ? (
+        <span className="muted">预览加载失败，可打开直链查看</span>
+      ) : (
+        <img
+          src={item.url}
+          alt={item.name}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
 export function OnlineMaterials({
   kind,
   imported,
@@ -19,7 +38,7 @@ export function OnlineMaterials({
 }: {
   kind: AssetKind;
   imported: () => Promise<void>;
-  notify: (message: string) => void;
+  notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
   const [query, setQuery] = useState(sourceKeywords[kind] ?? ""),
     [page, setPage] = useState<OnlineMaterialPage | null>(null),
@@ -28,6 +47,9 @@ export function OnlineMaterials({
     [url, setUrl] = useState(""),
     [error, setError] = useState("");
   const generation = useRef(0);
+  const [history, setHistory] = useState([0]),
+    [pageIndex, setPageIndex] = useState(0),
+    [searchedQuery, setSearchedQuery] = useState("");
   const [sources, setSources] = useState<MaterialSources>(defaultSources),
     [settingsOpen, setSettingsOpen] = useState(false);
   const source = sources.sources.find((s) => s.id === sources.selectedId)!;
@@ -42,16 +64,28 @@ export function OnlineMaterials({
     setPage(null);
     setError("");
     setBusy(false);
+    setHistory([0]);
+    setPageIndex(0);
   }, [kind]);
-  async function search(offset = 0) {
+  async function search(offset = 0, move: "reset" | "next" | "prev" = "reset") {
     const current = ++generation.current;
     setBusy(true);
     setError("");
     try {
       const result = await request<OnlineMaterialPage>(
-        `/api/materials/online?q=${encodeURIComponent(query)}&offset=${offset}`,
+        `/api/materials/online?q=${encodeURIComponent(move === "reset" ? query : searchedQuery)}&offset=${offset}`,
       );
-      if (current === generation.current) setPage(result);
+      if (current === generation.current) {
+        setPage(result);
+        if (move === "reset") {
+          setHistory([offset]);
+          setPageIndex(0);
+          setSearchedQuery(query);
+        } else if (move === "next") {
+          setHistory([...history.slice(0, pageIndex + 1), offset]);
+          setPageIndex(pageIndex + 1);
+        } else setPageIndex(pageIndex - 1);
+      }
     } catch (e) {
       if (current === generation.current) setError((e as Error).message);
     } finally {
@@ -83,8 +117,27 @@ export function OnlineMaterials({
     <details className="online-materials">
       <summary>在线素材</summary>
       <p>
-        从 {source.name}{" "}
-        的目录选择素材，按当前分类导入。下载后保存在本机，也可以打包保存。
+        您可以从在线素材源选择并导入素材。素材会保存到本机，也可以导出为素材包。
+      </p>
+      <p className="current-material-source">
+        当前素材源：<strong>{source.name}</strong>
+        {source.type === "moenotes" && (
+          <span>
+            {" "}
+            ·{" "}
+            {
+              (
+                {
+                  "zh-Hans": "简体中文",
+                  "zh-Hant": "繁体中文",
+                  ja: "日文",
+                  en: "英文",
+                  ko: "韩文",
+                } as const
+              )[source.locale || "zh-Hans"]
+            }
+          </span>
+        )}
       </p>
       <div className="online-search">
         <input
@@ -128,6 +181,11 @@ export function OnlineMaterials({
           <div className="online-results">
             {page.files.map((item) => (
               <article key={item.path}>
+                {item.kind === "image" ? (
+                  <MaterialThumbnail key={item.url} item={item} />
+                ) : (
+                  <audio controls preload="none" src={item.url} />
+                )}
                 <strong>{item.name}</strong>
                 <small>
                   {item.path.replace("Assets/AddressableResources/", "")}
@@ -158,15 +216,23 @@ export function OnlineMaterials({
               当前页没有可直接下载的素材，可以换关键词或查看下一页。
             </p>
           )}
-          {page.nextOffset !== null && (
+          <div className="online-pages">
             <button
               className="button secondary"
-              disabled={busy}
-              onClick={() => void search(page.nextOffset!)}
+              disabled={busy || pageIndex === 0}
+              onClick={() => void search(history[pageIndex - 1]!, "prev")}
+            >
+              上一页
+            </button>
+            <span>第 {pageIndex + 1} 页</span>
+            <button
+              className="button secondary"
+              disabled={busy || page.nextOffset === null}
+              onClick={() => void search(page.nextOffset!, "next")}
             >
               下一页
             </button>
-          )}
+          </div>
         </>
       )}
       <details className="online-direct">
@@ -176,7 +242,7 @@ export function OnlineMaterials({
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="HTTP(S) 图片、音频或字体文件地址"
+            placeholder="HTTP(S) 图片或音频文件地址"
             aria-label="素材直链"
           />
           <button
@@ -197,6 +263,9 @@ export function OnlineMaterials({
             setSources(v);
             setPage(null);
             setError("");
+            setBusy(false);
+            setHistory([0]);
+            setPageIndex(0);
             if (v.sources.find((s) => s.id === v.selectedId)?.type === "json")
               setQuery("");
           }}

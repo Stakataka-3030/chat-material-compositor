@@ -11,23 +11,43 @@ import {
 import { AssetStore } from "./assets.js";
 import { importMaterialPack } from "./material-packs.js";
 import { DATA } from "./config.js";
+import { z } from "zod";
+import {
+  extractAppearance,
+  type ConfigScope,
+} from "../core/appearance-config.js";
 function appearance(input: unknown) {
   return projectSchema.parse({ ...newProject(), appearance: input }).appearance;
 }
 function referenced(value: Appearance) {
   return usedAssetIds({ ...newProject(), appearance: value });
 }
-export async function exportPhoneConfig(input: unknown, store: AssetStore) {
+export async function exportPhoneConfig(
+  input: unknown,
+  store: AssetStore,
+  inputScope: unknown = "all",
+) {
+  const scope = z.enum(["system", "software", "all"]).parse(inputScope);
   const value = appearance(input),
+    selected = extractAppearance(value, scope),
     zip = new AdmZip(),
-    chosen = [...referenced(value)].map((id) => store.get(id));
+    chosen = [
+      ...referenced(appearance({ ...newProject().appearance, ...selected })),
+    ].map((id) => store.get(id));
   if (chosen.reduce((n, a) => n + a.bytes, 0) > 256 * 1024 * 1024)
     throw new Error("配置素材超过256MB");
   zip.addFile(
     "phone-config.json",
     Buffer.from(
       JSON.stringify(
-        { format: "chat-phone-config", version: 1, appearance: value },
+        scope === "all"
+          ? { format: "chat-phone-config", version: 1, appearance: value }
+          : {
+              format: "chat-phone-config",
+              version: 2,
+              scope,
+              appearance: selected,
+            },
         null,
         2,
       ),
@@ -42,6 +62,7 @@ export async function exportPhoneConfig(input: unknown, store: AssetStore) {
       bytes: a.bytes,
       tags: a.tags,
       source: a.source,
+      category: a.category,
     }));
     zip.addFile(
       "materials.json",
@@ -54,7 +75,12 @@ export async function exportPhoneConfig(input: unknown, store: AssetStore) {
   }
   return zip.toBuffer();
 }
-export async function importPhoneConfig(bytes: Buffer, store: AssetStore) {
+export async function importPhoneConfig(
+  bytes: Buffer,
+  store: AssetStore,
+  inputScope: unknown = "all",
+) {
+  const targetScope = z.enum(["system", "software", "all"]).parse(inputScope);
   if (bytes.length > 256 * 1024 * 1024) throw new Error("配置包超过256MB");
   const zip = new AdmZip(bytes),
     entries = zip.getEntries();
@@ -67,9 +93,21 @@ export async function importPhoneConfig(bytes: Buffer, store: AssetStore) {
   if (!entry || entry.header.size > 1_000_000)
     throw new Error("请选择手机界面配置包");
   const raw = JSON.parse(entry.getData().toString("utf8"));
-  if (raw.format !== "chat-phone-config" || raw.version !== 1)
+  if (raw.format !== "chat-phone-config" || ![1, 2].includes(raw.version))
     throw new Error("手机配置格式不支持");
-  const value = appearance(raw.appearance),
+  const scope: ConfigScope =
+    raw.version === 1 ? "all" : z.enum(["system", "software"]).parse(raw.scope);
+  if (scope !== "all" && targetScope !== "all" && scope !== targetScope)
+    throw new Error("配置包类型不匹配，请在对应的手机界面或聊天软件配置区导入");
+  const validated = appearance({
+      ...newProject().appearance,
+      ...raw.appearance,
+    }),
+    selected = extractAppearance(
+      validated,
+      scope === "all" ? targetScope : scope,
+    ),
+    value = appearance({ ...newProject().appearance, ...selected }),
     base = path.resolve(DATA, "tmp/phone-config"),
     root = path.join(base, randomUUID());
   const staged = new AssetStore({ root, data: path.join(root, "data") });
@@ -93,7 +131,10 @@ export async function importPhoneConfig(bytes: Buffer, store: AssetStore) {
         throw new Error("配置素材分类不匹配");
     }
     await store.absorb(staged);
-    return value;
+    const resultScope = scope === "all" ? targetScope : scope;
+    return resultScope === "all"
+      ? validated
+      : { scope: resultScope, appearance: selected };
   } finally {
     const target = path.resolve(root);
     if (!target.startsWith(base + path.sep))
