@@ -1,4 +1,5 @@
 import type { Project, Message } from "./model.js";
+import { runtimeEffects } from "./interaction.js";
 export interface MessageEvent {
   messageId: string;
   index: number;
@@ -55,6 +56,18 @@ export function buildTimeline(project: Project): Timeline {
     cursor,
     ...events.map((e) => e.endMs),
     ...voiceEnds,
+    ...project.messages.flatMap((m, i) =>
+      (m.interactions ?? []).map(
+        (record) => events[i]!.atMs + record.atMs + 100,
+      ),
+    ),
+    ...runtimeEffects(project, events).map(
+      (effect) =>
+        effect.atMs +
+        (effect.action.type === "avatar-shake"
+          ? (effect.action.durationMs ?? 600)
+          : 100),
+    ),
     ...project.messages.flatMap((m, i) =>
       project.appearance.showRead &&
       project.appearance.ui?.readText !== "" &&

@@ -63,7 +63,9 @@ export class ExportQueue extends EventEmitter {
     const project = projectSchema.parse(structuredClone(input)),
       registry = new PluginRegistry(project.plugins);
     if (!project.messages.length) throw new Error("请先添加消息");
-    project.messages.forEach((m) => registry.validate(m));
+    project.messages.forEach((m) =>
+      registry.validate(m, new Set(project.speakers.map((s) => s.id))),
+    );
     const id = uid(),
       job: ExportJob = {
         id,

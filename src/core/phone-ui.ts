@@ -8,6 +8,7 @@ export const configurableIcons = [
   "headerLeft",
   "headerRight1",
   "headerRight2",
+  "headerRight3",
   "footerLeft1",
   "footerLeft2",
   "footerLeft3",
@@ -101,6 +102,9 @@ export const phoneDefaults = {
   fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
   fontAssetId: null as string | null,
   messageCSS: "",
+  mentionColor: "",
+  mentionBold: true,
+  mentionAllText: "@全体成员",
   fontWeight: 400,
   boldWeight: 600,
   lineHeight: 1.45,
@@ -122,6 +126,18 @@ export const phoneDefaults = {
   headerLeft: "back",
   headerRight1: "phone",
   headerRight2: "menu",
+  headerRight3: "none",
+  headerTransparent: false,
+  headerLineVisible: true,
+  statusTransparent: false,
+  statusIconProfile: "classic",
+  batteryPercentPlacement: "outside",
+  bubbleTailStyle: "point",
+  nameBold: false,
+  messageTimeVisible: false,
+  messageTimeSize: 10,
+  messageTimeColor: "",
+  readCountVisible: false,
   footerVisible: true,
   footerHeight: 50,
   footerIconSize: 20,
@@ -178,6 +194,9 @@ export type PhoneUI = Omit<
   | "statusWifiSymbol"
   | "statusClockSymbol"
   | "statusLocationSymbol"
+  | "statusIconProfile"
+  | "batteryPercentPlacement"
+  | "bubbleTailStyle"
   | "titleAlign"
   | "headerLeftAssetId"
   | "headerRight1AssetId"
@@ -194,6 +213,9 @@ export type PhoneUI = Omit<
   statusWifiSymbol: string;
   statusClockSymbol: string;
   statusLocationSymbol: string;
+  statusIconProfile: "classic" | "ios";
+  batteryPercentPlacement: "outside" | "inside";
+  bubbleTailStyle: "point" | "round";
   titleAlign: "left" | "center" | "right";
   headerLeftAssetId: string | null;
   headerRight1AssetId: string | null;
@@ -271,6 +293,9 @@ export const phoneGroups: {
       ["boldWeight", "粗体字重"],
       ["lineHeight", "正文行距倍数"],
       ["messageCSS", "正文CSS"],
+      ["mentionColor", "@文字颜色"],
+      ["mentionBold", "@文字加粗"],
+      ["mentionAllText", "@全体成员显示文字"],
     ],
   },
   {
@@ -282,6 +307,9 @@ export const phoneGroups: {
       ["statusFontFamily", "状态栏字体列表"],
       ["statusFontAssetId", "状态栏本机字体"],
       ["statusFontWeight", "状态栏字重"],
+      ["statusTransparent", "状态栏背景透明"],
+      ["statusIconProfile", "系统图标风格"],
+      ["batteryPercentPlacement", "电量百分比位置"],
       ["batteryPercentVisible", "显示电量百分比"],
       ["signalVisible", "显示左一（默认：信号）"],
       ["wifiVisible", "显示左二（默认：Wi-Fi）"],
@@ -309,6 +337,10 @@ export const phoneGroups: {
       ["headerRight1AssetId", "右侧第一个素材"],
       ["headerRight2", "右侧第二个图标"],
       ["headerRight2AssetId", "右侧第二个素材"],
+      ["headerRight3", "右侧第三个图标"],
+      ["headerRight3AssetId", "右侧第三个素材"],
+      ["headerTransparent", "顶栏背景透明"],
+      ["headerLineVisible", "顶栏分隔线"],
       ["headerBackground", "背景颜色"],
       ["titleColor", "标题和图标颜色"],
     ],
@@ -333,6 +365,12 @@ export const phoneGroups: {
       ["bubbleRadius", "气泡圆角"],
       ["cardRadius", "卡片圆角"],
       ["bubbleTail", "气泡尖角"],
+      ["bubbleTailStyle", "尖角形状"],
+      ["nameBold", "昵称加粗"],
+      ["messageTimeVisible", "显示消息时间"],
+      ["messageTimeSize", "消息时间字号"],
+      ["messageTimeColor", "消息时间颜色"],
+      ["readCountVisible", "群聊已读显示人数"],
       ["nameSize", "昵称大小"],
       ["nameHeight", "昵称占用高度"],
       ["readSize", "已读文字大小"],
@@ -430,6 +468,7 @@ const iconTitles: Record<IconRole, string> = {
   headerLeft: "顶栏左图标",
   headerRight1: "顶栏右图标1",
   headerRight2: "顶栏右图标2",
+  headerRight3: "顶栏右图标3",
   footerLeft1: "底栏左图标1",
   footerLeft2: "底栏左图标2",
   footerLeft3: "底栏左图标3",
@@ -572,6 +611,10 @@ for (const [key, value] of Object.entries(phoneDefaults)) {
     schema = z.enum(["none", "gesture", "buttons"]);
   else if (key.endsWith("Symbol"))
     schema = z.enum(iconNames as [string, ...string[]]);
+  else if (key === "statusIconProfile") schema = z.enum(["classic", "ios"]);
+  else if (key === "batteryPercentPlacement")
+    schema = z.enum(["outside", "inside"]);
+  else if (key === "bubbleTailStyle") schema = z.enum(["point", "round"]);
   else if (key === "titleAlign") schema = z.enum(["left", "center", "right"]);
   else if (/^header(Left|Right\d)$|^footer(Left|Right)\d$/.test(key))
     schema = z.enum(iconNames as [string, ...string[]]);

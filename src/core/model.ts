@@ -45,29 +45,77 @@ export interface Speaker {
   color: string;
 }
 export type FieldValue = string | number | boolean | null;
+export interface Mention {
+  field: string;
+  start: number;
+  end: number;
+  speakerId: string;
+}
+export type ComponentAction =
+  | { type: "set-field"; field: string; value: FieldValue }
+  | { type: "group-join" | "group-leave"; targetField: string }
+  | {
+      type: "avatar-shake";
+      targetField: string;
+      durationMs?: number;
+      amplitude?: number;
+      durationField?: string;
+      amplitudeField?: string;
+    };
+export interface InteractionRecord {
+  id: string;
+  nodeId: string;
+  atMs: number;
+  actions: ComponentAction[];
+}
 export interface Message {
   id: string;
   speakerId: string;
   kind: string;
   data: Record<string, FieldValue>;
+  mentions?: Mention[];
+  interactions?: InteractionRecord[];
   waitMs: number;
   typingMs: number;
   enterAnimation?: "inherit" | "pop" | "none";
   readDelayMs?: number;
+  timeLabel?: string;
+  readCount?: number;
   read: boolean;
   soundId: string | null;
 }
 export interface PluginField {
   key: string;
   label: string;
-  type: "text" | "multiline" | "number" | "asset" | "select" | "color";
+  type:
+    | "text"
+    | "multiline"
+    | "number"
+    | "asset"
+    | "select"
+    | "color"
+    | "speaker"
+    | "boolean";
   default: FieldValue;
   required?: boolean;
   options?: string[];
   assetKind?: AssetKind;
 }
 export interface LayoutNode {
-  type: "text" | "image" | "column" | "row" | "space" | "line" | "wave";
+  type:
+    | "text"
+    | "image"
+    | "column"
+    | "row"
+    | "space"
+    | "line"
+    | "wave"
+    | "button";
+  id?: string;
+  actions?: ComponentAction[];
+  disabledWhen?: { field: string; equals: FieldValue };
+  background?: string;
+  radius?: number;
   text?: string;
   css?: string;
   asset?: string;
@@ -90,6 +138,7 @@ export interface StylePlugin {
   enabled: boolean;
   builtin?: boolean;
   fields: PluginField[];
+  effects?: ComponentAction[];
   layout: {
     variant: "bubble" | "card" | "media" | "separator";
     width?: number;
@@ -134,6 +183,7 @@ export interface Project {
   revision: number;
   meId: string;
   speakers: Speaker[];
+  group?: { initialMemberIds: string[] | null };
   messages: Message[];
   appearance: Appearance;
   audio: {
@@ -173,9 +223,52 @@ const value = z.union([
   z.boolean(),
   z.null(),
 ]);
+export const componentActionSchema: z.ZodType<ComponentAction> =
+  z.discriminatedUnion("type", [
+    z.object({ type: z.literal("set-field"), field: id, value }).strict(),
+    z
+      .object({ type: z.enum(["group-join", "group-leave"]), targetField: id })
+      .strict(),
+    z
+      .object({
+        type: z.literal("avatar-shake"),
+        targetField: id,
+        durationMs: z.number().min(100).max(10000).optional(),
+        amplitude: z.number().min(0).max(30).optional(),
+        durationField: id.optional(),
+        amplitudeField: id.optional(),
+      })
+      .strict(),
+  ]);
+const mentionSchema = z.object({
+  field: id,
+  start: z.number().int().nonnegative(),
+  end: z.number().int().min(1),
+  speakerId: id,
+});
+const interactionSchema = z.object({
+  id,
+  nodeId: id,
+  atMs: z.number().min(0).max(3600000),
+  actions: z.array(componentActionSchema).min(1).max(16),
+});
 const nodeSchema: z.ZodType<LayoutNode> = z.lazy(() =>
   z.object({
-    type: z.enum(["text", "image", "column", "row", "space", "line", "wave"]),
+    type: z.enum([
+      "text",
+      "image",
+      "column",
+      "row",
+      "space",
+      "line",
+      "wave",
+      "button",
+    ]),
+    id: id.optional(),
+    actions: z.array(componentActionSchema).min(1).max(16).optional(),
+    disabledWhen: z.object({ field: id, equals: value }).optional(),
+    background: z.string().max(40).optional(),
+    radius: z.number().min(0).max(100).optional(),
     text: z.string().max(10000).optional(),
     css: z.string().max(4000).optional(),
     asset: z.string().max(120).optional(),
@@ -198,6 +291,14 @@ export const pluginSchema: z.ZodType<StylePlugin> = z.object({
   icon: z.string().max(30),
   enabled: z.boolean(),
   builtin: z.boolean().optional(),
+  effects: z
+    .array(componentActionSchema)
+    .max(16)
+    .refine(
+      (actions) => actions.every((a) => a.type !== "set-field"),
+      "自动事件不支持修改编辑字段",
+    )
+    .optional(),
   fields: z
     .array(
       z.object({
@@ -210,6 +311,8 @@ export const pluginSchema: z.ZodType<StylePlugin> = z.object({
           "asset",
           "select",
           "color",
+          "speaker",
+          "boolean",
         ]),
         default: value,
         required: z.boolean().optional(),
@@ -246,6 +349,9 @@ export const projectSchema: z.ZodType<Project> = z
       )
       .min(2)
       .max(256),
+    group: z
+      .object({ initialMemberIds: z.array(id).max(256).nullable() })
+      .optional(),
     messages: z
       .array(
         z.object({
@@ -253,10 +359,14 @@ export const projectSchema: z.ZodType<Project> = z
           speakerId: id,
           kind: id,
           data: z.record(z.string(), value),
+          mentions: z.array(mentionSchema).max(256).optional(),
+          interactions: z.array(interactionSchema).max(200).optional(),
           waitMs: z.number().min(0).max(600000),
           typingMs: z.number().min(0).max(60000),
           enterAnimation: z.enum(["inherit", "pop", "none"]).optional(),
           readDelayMs: z.number().min(0).max(60000).optional(),
+          timeLabel: z.string().max(30).optional(),
+          readCount: z.number().int().min(0).max(99999).optional(),
           read: z.boolean(),
           soundId: id.nullable(),
         }),
@@ -266,7 +376,7 @@ export const projectSchema: z.ZodType<Project> = z
       ui: phoneUISchema.optional(),
       mode: z.enum(["single", "group"]),
       title: z.string().max(120),
-      groupCount: z.number().int().min(2).max(99999).nullable(),
+      groupCount: z.number().int().min(0).max(99999).nullable(),
       theme: z.enum(["light", "dark"]),
       showStatusTime: z.boolean().optional(),
       screenHeightRatio: z.number().min(0.35).max(1).optional(),
@@ -328,6 +438,18 @@ export const projectSchema: z.ZodType<Project> = z
         message: "请设置我方角色",
         path: ["meId"],
       });
+    if (p.group?.initialMemberIds) {
+      const ids = p.group.initialMemberIds;
+      if (
+        new Set(ids).size !== ids.length ||
+        ids.some((member) => !speakerIds.has(member))
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "初始群成员无效",
+          path: ["group"],
+        });
+    }
     const messageIds = new Set<string>();
     for (const [i, m] of p.messages.entries()) {
       if (!speakerIds.has(m.speakerId))
@@ -343,6 +465,29 @@ export const projectSchema: z.ZodType<Project> = z
           path: ["messages", i, "id"],
         });
       messageIds.add(m.id);
+      for (const mention of m.mentions ?? []) {
+        const text = m.data[mention.field];
+        if (
+          (mention.speakerId !== "all" && !speakerIds.has(mention.speakerId)) ||
+          typeof text !== "string" ||
+          mention.end <= mention.start ||
+          mention.end > text.length
+        )
+          ctx.addIssue({
+            code: "custom",
+            message: "消息中的角色引用无效",
+            path: ["messages", i, "mentions"],
+          });
+      }
+      if (
+        new Set((m.interactions ?? []).map((e) => e.id)).size !==
+        (m.interactions ?? []).length
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "交互记录ID重复",
+          path: ["messages", i, "interactions"],
+        });
     }
   });
 export function newProject(): Project {
@@ -417,7 +562,12 @@ export function createMessage(speakerId: string, plugin: StylePlugin): Message {
     id: uid(),
     speakerId,
     kind: plugin.id,
-    data: Object.fromEntries(plugin.fields.map((f) => [f.key, f.default])),
+    data: Object.fromEntries(
+      plugin.fields.map((f) => [
+        f.key,
+        f.type === "speaker" && f.default === null ? speakerId : f.default,
+      ]),
+    ),
     waitMs: 800,
     typingMs: 0,
     enterAnimation: plugin.layout.variant === "separator" ? "none" : "inherit",
@@ -440,9 +590,28 @@ export function removeSpeaker(
   return {
     ...project,
     speakers: project.speakers.filter((s) => s.id !== speakerId),
-    messages: project.messages.map((m) =>
-      m.speakerId === speakerId ? { ...m, speakerId: replacementId } : m,
-    ),
+    group: project.group
+      ? {
+          initialMemberIds:
+            project.group.initialMemberIds?.filter((id) => id !== speakerId) ??
+            null,
+        }
+      : undefined,
+    messages: project.messages.map((m) => ({
+      ...m,
+      speakerId: m.speakerId === speakerId ? replacementId : m.speakerId,
+      mentions: m.mentions?.map((ref) =>
+        ref.speakerId === speakerId
+          ? { ...ref, speakerId: replacementId }
+          : ref,
+      ),
+      data: Object.fromEntries(
+        Object.entries(m.data).map(([key, value]) => [
+          key,
+          value === speakerId ? replacementId : value,
+        ]),
+      ),
+    })),
   };
 }
 export function usedAssetIds(project: Project): Set<string> {
@@ -466,7 +635,14 @@ export function usedAssetIds(project: Project): Set<string> {
     const custom = project.plugins.find((p) => p.id === m.kind);
     for (const field of custom?.fields ?? [])
       if (field.type === "asset") add(m.data[field.key]);
-    Object.values(m.data).forEach((value) => {
+    [
+      ...Object.values(m.data),
+      ...(m.interactions ?? []).flatMap((record) =>
+        record.actions.flatMap((action) =>
+          action.type === "set-field" ? [action.value] : [],
+        ),
+      ),
+    ].forEach((value) => {
       if (
         typeof value === "string" &&
         /^(shell|wallpaper|avatar|sticker|image|sound|icon|mask|font|bar-background)-[a-f0-9]{24}$/.test(

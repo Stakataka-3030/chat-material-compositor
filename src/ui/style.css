@@ -1743,6 +1743,28 @@ progress {
   height: 32px;
   margin-top: 8px;
 }
+.mention-editor {
+  display: grid;
+  gap: 7px;
+}
+.mention-editor select {
+  font-size: 12px;
+}
+.mention-links {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mention-links .text-button {
+  font-size: 11px;
+}
+.interaction-records > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
 .asset-preview {
   display: flex;
   align-items: center;

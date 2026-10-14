@@ -8,6 +8,7 @@ import {
   Clock,
   Link,
   ArrowLeftRight,
+  Users,
   X,
 } from "lucide-react";
 import type { Asset, AssetKind } from "../core/model.js";
@@ -21,6 +22,7 @@ const icons: Record<string, typeof MessageSquare> = {
   clock: Clock,
   link: Link,
   transfer: ArrowLeftRight,
+  users: Users,
 };
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const Component = icons[name] || MessageSquare;

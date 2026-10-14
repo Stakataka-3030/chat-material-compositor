@@ -16,6 +16,7 @@ const systemKeys = new Set([
   "locationVisible",
   "batteryVisible",
   "batteryColor",
+  "batteryPercentPlacement",
 ]);
 export function uiScope(key: string): Exclude<ConfigScope, "all"> {
   return systemKeys.has(key) || /^(status|camera|navigation|battery)/.test(key)

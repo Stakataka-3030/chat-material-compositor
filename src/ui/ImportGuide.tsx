@@ -76,10 +76,42 @@ export function ImportGuide({
               </li>
             </ol>
             <p>
-              字段可用 text、multiline、number、select、color、asset。布局可用
+              字段可用
+              text、multiline、number、select、color、asset、speaker、boolean。布局可用
               text、image、row、column、space、line、wave；行和列的子项放在
               children 中。图片节点的 asset 填素材字段的 key，例如 imageAsset。
             </p>
+            <details>
+              <summary>角色、事件与交互组件</summary>
+              <p>
+                speaker 字段从角色库选择角色。正文使用{" "}
+                <code>{"{{target.name}}"}</code> 显示 target
+                对应的昵称。文本编辑器的“插入
+                @”会保存角色关联，改名后预览也会更新。
+              </p>
+              <p>
+                effects 支持 group-join、group-leave 和
+                avatar-shake，targetField 指定角色字段；震动可配置
+                durationMs、amplitude，也可用 durationField、amplitudeField
+                读取数字字段。
+              </p>
+              <p>
+                布局可使用 button 节点，填写独立 id、text 和 actions。按钮支持
+                set-field、入群、退群、头像震动；disabledWhen 可指定字段和
+                equals。点击手机预览中的按钮会记录交互时间，重播与导出会自动重现。
+              </p>
+              <p>
+                组件包使用 ZIP 或 .chatcomponent，包含 component.json
+                和可选素材。导出已安装组件时会带上资产字段默认引用的素材。
+              </p>
+              <a
+                className="text-button"
+                href="/api/components/example"
+                download="邀请卡片.component.json"
+              >
+                下载交互组件示例
+              </a>
+            </details>
             <p>
               文字节点可加 <code>css</code>，例如{" "}
               <code>{'"css": "color: #d34b72; font-weight: 700;"'}</code>

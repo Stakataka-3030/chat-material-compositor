@@ -5,7 +5,17 @@ import {
   type LayoutNode,
   type StylePlugin,
   usedAssetIds,
+  type FieldValue,
+  type ComponentAction,
 } from "./model.js";
+import {
+  messageData,
+  runtimeEffects,
+  membersAt,
+  avatarShake,
+  type RuntimeEffect,
+} from "./interaction.js";
+import { richTextRuns, wrapTextRuns, type TextRun } from "./rich-text.js";
 import { PluginRegistry, interpolate } from "./plugins.js";
 import { shellCoverage } from "./shell-mask.js";
 import {
@@ -59,10 +69,12 @@ interface NodeBox {
   lines?: string[];
   baselines?: number[];
   textStyle?: TextStyle;
+  richLines?: TextRun[][];
   children?: NodeBox[];
 }
 interface Block {
   message: Message;
+  data: Record<string, FieldValue>;
   plugin: StylePlugin;
   y: number;
   height: number;
@@ -132,6 +144,15 @@ export class ChatRenderer {
   private maskCanvas = document.createElement("canvas");
   private shellMask: HTMLCanvasElement | null = null;
   hits: HitBox[] = [];
+  private effects: RuntimeEffect[] = [];
+  private interactionTimes: number[] = [];
+  private layoutState = -1;
+  private currentAtMs = Infinity;
+  private buildingMessage: Message | null = null;
+  private controls: (HitBox & {
+    nodeId: string;
+    actions: ComponentAction[];
+  })[] = [];
   constructor(
     readonly project: Project,
     assets: Asset[],
@@ -141,6 +162,14 @@ export class ChatRenderer {
     this.registry = new PluginRegistry(project.plugins);
     this.timeline = buildTimeline(project);
     this.ui = resolvePhoneUI(project.appearance.ui);
+    this.effects = runtimeEffects(project, this.timeline.events);
+    this.interactionTimes = project.messages
+      .flatMap((m, i) =>
+        (m.interactions ?? []).map(
+          (r) => this.timeline.events[i]!.atMs + r.atMs,
+        ),
+      )
+      .sort((a, b) => a - b);
     const baseTheme = project.appearance.theme === "dark" ? dark : light;
     this.theme = {
       ...baseTheme,
@@ -307,7 +336,7 @@ export class ChatRenderer {
       .get(block.message.kind)
       .fields.filter((f) => f.type === "asset")
       .flatMap((f) => {
-        const id = block.message.data[f.key];
+        const id = block.data[f.key];
         return typeof id === "string" && this.assetMap.get(id)?.kind !== "sound"
           ? [id]
           : [];
@@ -326,6 +355,7 @@ export class ChatRenderer {
       }
   }
   async ensureFrame(atMs: number) {
+    this.ensureLayout(atMs);
     const h = this.chatBox().height;
     const visible = (time: number) => {
       const scroll = this.scroll(time, h);
@@ -422,6 +452,23 @@ export class ChatRenderer {
   ): NodeBox {
     const limit = Math.min(width, node.width ?? width),
       gap = node.gap ?? 5;
+    if (node.type === "button") {
+      const label = interpolate(node.text ?? "按钮", data),
+        size = node.size ?? 14;
+      this.measure.font = this.font(size, true);
+      return {
+        node,
+        x: 0,
+        y: 0,
+        width: Math.min(
+          limit,
+          node.width ??
+            Math.max(70, this.measure.measureText(label).width + 24),
+        ),
+        height: node.height ?? 36,
+        lines: [label],
+      };
+    }
     if (node.type === "text") {
       let text = interpolate(node.text ?? "", data);
       if (!text) return { node, x: 0, y: 0, width: 0, height: 0, lines: [] };
@@ -455,22 +502,68 @@ export class ChatRenderer {
         text = text.toLocaleLowerCase();
       else if (textStyle.transform === "capitalize")
         text = text.replace(/(^|\s)\S/g, (v) => v.toLocaleUpperCase());
+      const rich = this.buildingMessage
+        ? richTextRuns(
+            this.project,
+            this.buildingMessage,
+            node.text ?? "",
+            data,
+          )
+        : [];
+      for (const run of rich) {
+        if (textStyle.transform === "uppercase")
+          run.text = run.text.toLocaleUpperCase();
+        else if (textStyle.transform === "lowercase")
+          run.text = run.text.toLocaleLowerCase();
+        else if (textStyle.transform === "capitalize")
+          run.text = run.text.replace(/(^|\s)\S/g, (v) =>
+            v.toLocaleUpperCase(),
+          );
+      }
+      const richLines = rich.some((r) => r.mention)
+        ? wrapTextRuns(rich, limit, (value, mention) => {
+            this.measure.font = textFont({
+              ...textStyle,
+              weight:
+                mention && this.ui.mentionBold
+                  ? Math.max(textStyle.weight, this.ui.boldWeight)
+                  : textStyle.weight,
+            });
+            this.measure.letterSpacing = textStyle.spacing + "px";
+            return this.measure.measureText(value).width;
+          })
+        : undefined;
       const size = textStyle.size,
-        lines = this.wrap(text, limit, size, node.bold, textStyle),
+        lines = richLines
+          ? richLines.map((line) => line.map((run) => run.text).join(""))
+          : this.wrap(text, limit, size, node.bold, textStyle),
         lineHeight = textStyle.lineHeight;
       this.measure.font = textFont(textStyle);
       this.measure.letterSpacing = textStyle.spacing + "px";
       const metrics = lines.map((line) => this.measure.measureText(line));
+      const widths = metrics.map((metric, index) =>
+        richLines
+          ? richLines[index]!.reduce((sum, run) => {
+              this.measure.font = textFont({
+                ...textStyle,
+                weight:
+                  run.mention && this.ui.mentionBold
+                    ? Math.max(textStyle.weight, this.ui.boldWeight)
+                    : textStyle.weight,
+              });
+              return sum + this.measure.measureText(run.text).width;
+            }, 0)
+          : metric.width,
+      );
       return {
         node,
         x: 0,
         y: 0,
-        width: node.width
-          ? limit
-          : Math.min(limit, Math.max(...metrics.map((m) => m.width), 1)),
+        width: node.width ? limit : Math.min(limit, Math.max(...widths, 1)),
         height: lines.length * lineHeight,
         lines,
         textStyle,
+        richLines,
         baselines: metrics.map(
           (m, i) =>
             i * lineHeight +
@@ -568,16 +661,36 @@ export class ChatRenderer {
       (own ? this.ui.outgoingAvatarVisible : this.ui.incomingAvatarVisible)
     );
   }
-  private buildBlocks() {
+  private ensureLayout(atMs: number) {
+    let lo = 0,
+      hi = this.interactionTimes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.interactionTimes[mid]! <= atMs) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo !== this.layoutState) {
+      this.layoutState = lo;
+      this.buildBlocks(atMs);
+    }
+  }
+  private buildBlocks(atMs = Infinity) {
     let y = this.ui.chatTopPadding;
-    this.blocks = this.project.messages.map((message) => {
+    this.blocks = this.project.messages.map((message, index) => {
+      this.buildingMessage = message;
+      const data = messageData(
+        this.project,
+        message,
+        atMs - this.timeline.events[index]!.atMs,
+      );
       const plugin = this.registry.get(message.kind),
         own = message.speakerId === this.project.meId;
       const separator = plugin.layout.variant === "separator";
       const available =
         this.chatBox().width -
         this.ui.messageMargin * 2 -
-        (this.avatarVisible(own) ? this.ui.avatarSize + this.ui.avatarGap : 0);
+        (this.avatarVisible(own) ? this.ui.avatarSize + this.ui.avatarGap : 0) -
+        (this.ui.messageTimeVisible ? 42 : 0);
       const width = Math.max(
         20,
         Math.min(
@@ -589,7 +702,7 @@ export class ChatRenderer {
       const nodes = plugin.layout.nodes.map((node) =>
         this.nodeBox(
           node,
-          message.data,
+          data,
           Math.max(
             10,
             width -
@@ -634,6 +747,7 @@ export class ChatRenderer {
         ) + this.ui.messageGap;
       const block = {
         message,
+        data,
         plugin,
         y,
         height,
@@ -731,7 +845,7 @@ export class ChatRenderer {
       ctx.fillStyle =
         style.color ||
         this.color(
-          node.color ? interpolate(node.color, block.message.data) : undefined,
+          node.color ? interpolate(node.color, block.data) : undefined,
           block.own,
         );
       ctx.textAlign = style.align;
@@ -764,7 +878,34 @@ export class ChatRenderer {
           ctx.shadowOffsetX = shadow.x * scale;
           ctx.shadowOffsetY = shadow.y * scale;
         }
-        ctx.fillText(line, inkX, baseline);
+        const runs = box.richLines?.[i];
+        if (runs) {
+          let cursor = centered
+            ? inkX
+            : style.align === "center"
+              ? anchor - metrics.width / 2
+              : ["right", "end"].includes(style.align)
+                ? anchor - metrics.width
+                : anchor;
+          const normal = ctx.fillStyle;
+          ctx.textAlign = "left";
+          for (const run of runs) {
+            ctx.font = textFont({
+              ...style,
+              weight:
+                run.mention && this.ui.mentionBold
+                  ? Math.max(style.weight, this.ui.boldWeight)
+                  : style.weight,
+            });
+            ctx.fillStyle = run.mention
+              ? this.ui.mentionColor || "#4b6aef"
+              : normal;
+            ctx.fillText(run.text, cursor, baseline);
+            cursor += ctx.measureText(run.text).width;
+          }
+          ctx.font = textFont(style);
+          ctx.fillStyle = normal;
+        } else ctx.fillText(line, inkX, baseline);
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
@@ -792,10 +933,46 @@ export class ChatRenderer {
         ctx.textAlign = style.align;
       });
       ctx.restore();
-    } else if (node.type === "image") {
-      const image = this.images.get(
-        String(block.message.data[node.asset ?? ""] ?? ""),
+    } else if (node.type === "button") {
+      const disabled =
+        !!node.disabledWhen &&
+        block.data[node.disabledWhen.field] === node.disabledWhen.equals;
+      ctx.save();
+      if (disabled) ctx.globalAlpha *= 0.45;
+      rect(
+        ctx,
+        x,
+        y,
+        box.width,
+        box.height,
+        node.radius ?? 7,
+        node.background || this.theme.accent,
       );
+      ctx.font = this.font(node.size ?? 14, true);
+      ctx.fillStyle = node.color
+        ? interpolate(node.color, block.data)
+        : "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        box.lines?.[0] ?? "按钮",
+        x + box.width / 2,
+        y + box.height / 2,
+        Math.max(1, box.width - 16),
+      );
+      ctx.restore();
+      if (!disabled && node.id && node.actions)
+        this.controls.push({
+          messageId: block.message.id,
+          nodeId: node.id,
+          actions: node.actions,
+          x: x + this.chatBox().x,
+          y,
+          width: box.width,
+          height: box.height,
+        });
+    } else if (node.type === "image") {
+      const image = this.images.get(String(block.data[node.asset ?? ""] ?? ""));
       if (image) {
         ctx.save();
         rect(ctx, x, y, box.width, box.height, 7);
@@ -905,6 +1082,27 @@ export class ChatRenderer {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
+    if (this.ui.statusIconProfile === "ios" && name === "signal") {
+      for (let i = 0; i < 4; i++) {
+        const h = 5 + i * 4;
+        rect(ctx, 2 + i * 5, 22 - h, 3.6, h, 1, ctx.fillStyle as string);
+      }
+      ctx.restore();
+      return;
+    }
+    if (this.ui.statusIconProfile === "ios" && name === "wifi") {
+      ctx.lineWidth = 3;
+      for (const r of [17, 11]) {
+        ctx.beginPath();
+        ctx.arc(12, 22, r, -Math.PI * 0.76, -Math.PI * 0.24);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(12, 20, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     const paths: Record<string, string> = {
       signal: "M3 21V18 M8 21V13 M13 21V8 M18 21V3",
       wifi: "M2 7Q12 -1 22 7 M5 11Q12 5 19 11 M8 15Q12 12 16 15 M12 19h.1",
@@ -1001,14 +1199,15 @@ export class ChatRenderer {
       ctx.save();
       ctx.translate(u.statusX, u.statusY);
       const w = u.statusWidth > 0 ? u.statusWidth : width;
-      this.barBackground(
-        ctx,
-        w,
-        b.status,
-        u.statusBackground || base,
-        u.statusRadius,
-        u.statusBackgroundAssetId,
-      );
+      if (!u.statusTransparent || u.statusBackgroundAssetId)
+        this.barBackground(
+          ctx,
+          w,
+          b.status,
+          u.statusBackground || base,
+          u.statusRadius,
+          u.statusBackgroundAssetId,
+        );
       const cy = b.status / 2,
         color = u.statusColor || this.theme.text,
         size = Math.min(u.statusFontSize, Math.max(6, b.status - 4));
@@ -1066,7 +1265,19 @@ export class ChatRenderer {
         }
         ctx.fillStyle = p.color;
         ctx.textAlign = "right";
-        if (u.batteryPercentVisible)
+        if (
+          u.batteryPercentVisible &&
+          u.batteryPercentPlacement === "inside" &&
+          p.size > 0
+        ) {
+          ctx.save();
+          ctx.font = `600 ${Math.max(6, p.size * 0.32)}px ${u.statusFontFamily}`;
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(String(this.project.appearance.battery), p.x, p.y);
+          ctx.restore();
+        }
+        if (u.batteryPercentVisible && u.batteryPercentPlacement === "outside")
           ctx.fillText(
             this.project.appearance.battery + "%",
             p.x - p.size / 2 - 4,
@@ -1084,21 +1295,31 @@ export class ChatRenderer {
       ctx.save();
       ctx.translate(u.headerX, u.headerY < 0 ? b.status : u.headerY);
       const w = u.headerWidth > 0 ? u.headerWidth : width;
-      this.barBackground(
-        ctx,
-        w,
-        b.header,
-        u.headerBackground || base,
-        u.headerRadius,
-        u.headerBackgroundAssetId,
-      );
+      if (!u.headerTransparent || u.headerBackgroundAssetId)
+        this.barBackground(
+          ctx,
+          w,
+          b.header,
+          u.headerBackground || base,
+          u.headerRadius,
+          u.headerBackgroundAssetId,
+        );
       const cy = b.header / 2,
         size = Math.min(u.iconSize, Math.max(6, b.header - 6)),
         color = u.titleColor || this.theme.text;
       for (const [role, name, x] of [
         ["headerLeft", u.headerLeft, 22],
-        ["headerRight1", u.headerRight1, w - 60],
-        ["headerRight2", u.headerRight2, w - 23],
+        [
+          "headerRight1",
+          u.headerRight1,
+          w - (u.headerRight3 !== "none" || u.headerRight3AssetId ? 102 : 60),
+        ],
+        [
+          "headerRight2",
+          u.headerRight2,
+          w - (u.headerRight3 !== "none" || u.headerRight3AssetId ? 62 : 23),
+        ],
+        ["headerRight3", u.headerRight3, w - 23],
       ] as const)
         this.positionedIcon(ctx, role, name, x, cy, size, color);
       ctx.fillStyle = color;
@@ -1113,10 +1334,13 @@ export class ChatRenderer {
           ? this.project.appearance.title +
             " (" +
             (this.project.appearance.groupCount ??
-              this.project.speakers.length) +
+              membersAt(this.project, this.effects, this.currentAtMs).length) +
             ")"
           : this.project.appearance.title;
-      const max = Math.max(20, w - 148),
+      const max = Math.max(
+          20,
+          w - (u.headerRight3 !== "none" || u.headerRight3AssetId ? 188 : 148),
+        ),
         parts = [
           ...new Intl.Segmenter("zh", { granularity: "grapheme" }).segment(raw),
         ].map((s) => s.segment);
@@ -1132,12 +1356,14 @@ export class ChatRenderer {
             ? 55
             : w - 95;
       ctx.fillText(text, x + u.titleOffsetX, cy + u.titleOffsetY, max);
-      ctx.strokeStyle = this.theme.line;
-      ctx.lineWidth = 0.6;
-      ctx.beginPath();
-      ctx.moveTo(0, b.header - 0.5);
-      ctx.lineTo(w, b.header - 0.5);
-      ctx.stroke();
+      if (u.headerLineVisible) {
+        ctx.strokeStyle = this.theme.line;
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(0, b.header - 0.5);
+        ctx.lineTo(w, b.header - 0.5);
+        ctx.stroke();
+      }
       ctx.restore();
     }
     ctx.textAlign = "left";
@@ -1286,6 +1512,19 @@ export class ChatRenderer {
     ctx.translate(chat.x, 0);
     width = chat.width;
     this.hits = [];
+    this.controls = [];
+    const recentAvatars = new Map<string, string>();
+    for (const [i, block] of this.blocks.entries()) {
+      const y = chatTop + block.y - scroll;
+      if (
+        this.timeline.events[i]!.atMs <= atMs &&
+        this.avatarVisible(block.own) &&
+        block.plugin.layout.variant !== "separator" &&
+        y + block.height >= chatTop &&
+        y <= chatTop + chatHeight
+      )
+        recentAvatars.set(block.message.speakerId, block.message.id);
+    }
     for (const [index, block] of this.blocks.entries()) {
       const event = this.timeline.events[index]!;
       if (!all && event.atMs > atMs) continue;
@@ -1319,10 +1558,27 @@ export class ChatRenderer {
       ctx.scale(scale, scale);
       ctx.translate(-anchorX, -anchorY);
       if (!separator) {
-        if (this.avatarVisible(block.own))
-          this.avatar(ctx, block.message.speakerId, avatarX, y);
+        if (this.avatarVisible(block.own)) {
+          const shake =
+            recentAvatars.get(block.message.speakerId) === block.message.id
+              ? avatarShake(this.effects, block.message.speakerId, atMs)
+              : { x: 0, rotation: 0 };
+          ctx.save();
+          ctx.translate(
+            avatarX + this.ui.avatarSize / 2 + shake.x,
+            y + this.ui.avatarSize / 2,
+          );
+          ctx.rotate(shake.rotation);
+          this.avatar(
+            ctx,
+            block.message.speakerId,
+            -this.ui.avatarSize / 2,
+            -this.ui.avatarSize / 2,
+          );
+          ctx.restore();
+        }
         if (block.nameHeight) {
-          ctx.font = this.font(this.ui.nameSize);
+          ctx.font = this.font(this.ui.nameSize, this.ui.nameBold);
           ctx.fillStyle =
             this.project.appearance.nameColor ||
             (wallpaper ? "#ffffff" : this.theme.muted);
@@ -1343,7 +1599,7 @@ export class ChatRenderer {
       if (variant === "bubble" || variant === "card") {
         const background = block.plugin.layout.background
           ? this.color(
-              interpolate(block.plugin.layout.background, block.message.data),
+              interpolate(block.plugin.layout.background, block.data),
               block.own,
             )
           : block.own
@@ -1361,7 +1617,23 @@ export class ChatRenderer {
         if (variant === "bubble" && this.ui.bubbleTail) {
           ctx.fillStyle = background;
           ctx.beginPath();
-          if (block.own) {
+          if (this.ui.bubbleTailStyle === "round") {
+            const edge = block.own ? x + block.width : x,
+              side = block.own ? 1 : -1;
+            ctx.moveTo(edge - side * 12, bodyY + 1);
+            ctx.quadraticCurveTo(
+              edge + side * 3,
+              bodyY + 4,
+              edge + side * 8,
+              bodyY - 3,
+            );
+            ctx.quadraticCurveTo(
+              edge + side * 7,
+              bodyY + 12,
+              edge - side * 2,
+              bodyY + 18,
+            );
+          } else if (block.own) {
             ctx.moveTo(x + block.width - 6, bodyY + 4);
             ctx.lineTo(x + block.width + 5, bodyY + 4);
             ctx.lineTo(x + block.width - 1, bodyY + 13);
@@ -1406,6 +1678,17 @@ export class ChatRenderer {
           block,
         ),
       );
+      if (!separator && this.ui.messageTimeVisible) {
+        ctx.font = this.font(this.ui.messageTimeSize);
+        ctx.fillStyle = this.ui.messageTimeColor || this.theme.muted;
+        ctx.textBaseline = "bottom";
+        ctx.textAlign = block.own ? "right" : "left";
+        ctx.fillText(
+          block.message.timeLabel || this.project.appearance.statusTime,
+          block.own ? x - 5 : x + block.width + 5,
+          bodyY + block.bodyHeight,
+        );
+      }
       if (
         this.project.appearance.showRead &&
         block.own &&
@@ -1418,7 +1701,17 @@ export class ChatRenderer {
         ctx.textAlign = "left";
         ctx.textBaseline = "bottom";
         ctx.textAlign = "right";
-        ctx.fillText(this.ui.readText, x - 5, bodyY + block.bodyHeight);
+        ctx.fillText(
+          this.ui.readText +
+            (this.ui.readCountVisible &&
+            this.project.appearance.mode === "group"
+              ? " " + (block.message.readCount ?? 1)
+              : ""),
+          x - 5,
+          bodyY +
+            block.bodyHeight -
+            (this.ui.messageTimeVisible ? this.ui.messageTimeSize + 3 : 0),
+        );
       }
       ctx.restore();
       this.hits.push({
@@ -1524,6 +1817,8 @@ export class ChatRenderer {
     atMs: number,
     width = this.project.output.width,
   ) {
+    this.ensureLayout(atMs);
+    this.currentAtMs = atMs;
     const d = this.dimensions(width),
       g = this.geometry,
       t = this.project.appearance.transform;
@@ -1628,6 +1923,28 @@ export class ChatRenderer {
       )?.messageId ?? null
     );
   }
+  interactionHitTest(x: number, y: number, width = 720) {
+    const d = this.dimensions(width),
+      g = this.geometry,
+      t = this.project.appearance.transform,
+      a = (t.rotation * Math.PI) / 180;
+    const dx = x / d.scale - d.baseW / 2 - t.x,
+      dy = y / d.scale - d.baseH / 2 - t.y;
+    const sx =
+      (Math.cos(a) * dx + Math.sin(a) * dy) / t.scaleX +
+      g.frameW / 2 -
+      g.screenX;
+    const sy =
+      (-Math.sin(a) * dx + Math.cos(a) * dy) / t.scaleY +
+      g.frameH / 2 -
+      g.screenY;
+    return (
+      this.controls.find(
+        (b) =>
+          sx >= b.x && sx <= b.x + b.width && sy >= b.y && sy <= b.y + b.height,
+      ) ?? null
+    );
+  }
   longDimensions(width = this.project.output.width) {
     const g = this.geometry,
       shell =
@@ -1727,6 +2044,8 @@ export class ChatRenderer {
     offset = 0,
     pageHeight?: number,
   ) {
+    this.ensureLayout(Infinity);
+    this.currentAtMs = Infinity;
     const d = this.longDimensions(width),
       g = this.geometry,
       framed =

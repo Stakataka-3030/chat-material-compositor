@@ -183,6 +183,47 @@ export const builtinPlugins: StylePlugin[] = [
     },
   ),
 ];
+for (const [id, name, text, type] of [
+  ["group-join", "入群", "{{target.name}} 加入了群聊", "group-join"],
+  ["group-leave", "退群", "{{target.name}} 退出了群聊", "group-leave"],
+  [
+    "nudge",
+    "拍一拍",
+    "{{sender.name}} 拍了拍 {{target.name}}{{suffix}}",
+    "avatar-shake",
+  ],
+] as const) {
+  const plugin = define(
+    id,
+    name,
+    "users",
+    [
+      field("target", "目标角色", "speaker", null, { required: true }),
+      ...(id === "nudge"
+        ? [
+            field("suffix", "后缀", "text", ""),
+            field("shakeMs", "震动时长（毫秒）", "number", 600),
+            field("shakeStrength", "震动幅度", "number", 3),
+          ]
+        : []),
+    ],
+    {
+      variant: "separator",
+      nodes: [{ type: "text", text, size: 12, color: "$muted" }],
+    },
+  );
+  plugin.effects = [
+    type === "avatar-shake"
+      ? {
+          type,
+          targetField: "target",
+          durationField: "shakeMs",
+          amplitudeField: "shakeStrength",
+        }
+      : { type, targetField: "target" },
+  ];
+  builtinPlugins.push(plugin);
+}
 export class PluginRegistry {
   private plugins = new Map<string, StylePlugin>();
   constructor(extra: StylePlugin[] = []) {
@@ -213,9 +254,16 @@ export class PluginRegistry {
       if (
         field.default !== null &&
         field.type !== "number" &&
+        field.type !== "boolean" &&
         typeof field.default !== "string"
       )
         throw new Error(`${field.label}的默认值应为文本`);
+      if (
+        field.default !== null &&
+        field.type === "boolean" &&
+        typeof field.default !== "boolean"
+      )
+        throw new Error(`${field.label}的默认值应为布尔值`);
       if (
         field.type === "select" &&
         (!field.options?.length ||
@@ -224,6 +272,49 @@ export class PluginRegistry {
       )
         throw new Error(`${field.label}需要有效选项`);
     }
+    const nodeIds = new Set<string>();
+    const validateAction = (action: import("./model.js").ComponentAction) => {
+      const key =
+          action.type === "set-field" ? action.field : action.targetField,
+        field = p.fields.find((f) => f.key === key);
+      if (!field) throw new Error("交互引用了不存在的字段：" + key);
+      if (action.type !== "set-field" && field.type !== "speaker")
+        throw new Error("交互目标需要使用角色字段：" + key);
+      if (
+        action.type === "set-field" &&
+        action.value !== null &&
+        typeof action.value !==
+          (field.type === "number"
+            ? "number"
+            : field.type === "boolean"
+              ? "boolean"
+              : "string")
+      )
+        throw new Error("按钮赋值类型与字段不一致：" + key);
+      if (action.type === "avatar-shake")
+        for (const key of [action.durationField, action.amplitudeField].filter(
+          Boolean,
+        ))
+          if (p.fields.find((f) => f.key === key)?.type !== "number")
+            throw new Error("震动参数需要引用数字字段");
+    };
+    for (const action of p.effects ?? []) validateAction(action);
+    const buttons = (nodes: StylePlugin["layout"]["nodes"]) => {
+      for (const n of nodes) {
+        if (n.type === "button") {
+          if (!n.id || !n.actions?.length)
+            throw new Error("按钮需要独立id和actions");
+          if (nodeIds.has(n.id)) throw new Error("按钮ID重复：" + n.id);
+          nodeIds.add(n.id);
+          for (const action of n.actions) validateAction(action);
+        } else if (n.actions?.length)
+          throw new Error("只有按钮节点可配置actions");
+        if (n.disabledWhen && !keys.has(n.disabledWhen.field))
+          throw new Error("按钮条件引用了不存在的字段");
+        if (n.children) buttons(n.children);
+      }
+    };
+    buttons(p.layout.nodes);
     this.plugins.set(p.id, p);
   }
   get(id: string) {
@@ -239,7 +330,7 @@ export class PluginRegistry {
       this.get(id).fields.map((f) => [f.key, f.default]),
     );
   }
-  validate(message: Message) {
+  validate(message: Message, speakerIds?: Set<string>) {
     const p = this.get(message.kind);
     for (const f of p.fields) {
       const value = message.data[f.key];
@@ -251,10 +342,44 @@ export class PluginRegistry {
         (typeof value !== "number" || !Number.isFinite(value))
       )
         throw new Error(`${f.label}应为数字`);
-      if (value != null && f.type !== "number" && typeof value !== "string")
+      if (
+        value != null &&
+        f.type !== "number" &&
+        f.type !== "boolean" &&
+        typeof value !== "string"
+      )
         throw new Error(`${f.label}应为文本`);
+      if (value != null && f.type === "boolean" && typeof value !== "boolean")
+        throw new Error(`${f.label}应为布尔值`);
       if (value && f.options && !f.options.includes(String(value)))
         throw new Error(`${f.label}的选项不存在`);
+      if (
+        value &&
+        f.type === "speaker" &&
+        speakerIds &&
+        !speakerIds.has(String(value))
+      )
+        throw new Error(`${f.label}引用的角色不存在`);
+    }
+    const nodeIds = new Set<string>();
+    const visit = (nodes: StylePlugin["layout"]["nodes"]) => {
+      for (const node of nodes) {
+        if (node.type === "button" && node.id) nodeIds.add(node.id);
+        if (node.children) visit(node.children);
+      }
+    };
+    visit(p.layout.nodes);
+    for (const record of message.interactions ?? []) {
+      if (!nodeIds.has(record.nodeId))
+        throw new Error("交互按钮不存在：" + record.nodeId);
+      for (const action of record.actions) {
+        const key =
+          action.type === "set-field" ? action.field : action.targetField;
+        const field = p.fields.find((f) => f.key === key);
+        if (!field) throw new Error("交互引用字段不存在");
+        if (action.type !== "set-field" && field.type !== "speaker")
+          throw new Error("事件目标必须引用角色字段");
+      }
     }
   }
 }

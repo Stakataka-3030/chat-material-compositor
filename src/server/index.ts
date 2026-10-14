@@ -27,6 +27,11 @@ import { exportMaterialPack, importMaterialPack } from "./material-packs.js";
 import { exportPhoneConfig, importPhoneConfig } from "./phone-config.js";
 import { appearancePresets } from "../core/appearance-presets.js";
 import { installBuiltinSounds } from "./builtin-sounds.js";
+import {
+  exportComponent,
+  importComponent,
+  interactionExample,
+} from "./component-packs.js";
 const app = express(),
   server = http.createServer(app),
   clientToken = randomUUID();
@@ -283,6 +288,25 @@ app.post(
   },
 );
 app.get("/api/plugins", (_req, res) => res.json(plugins.list()));
+app.get("/api/components/example", (_req, res) =>
+  res.attachment("interaction.component.json").json(interactionExample),
+);
+app.get("/api/components/:id/package", async (req, res) => {
+  const plugin = plugins.list().find((p) => p.id === req.params.id);
+  if (!plugin) return res.status(404).json({ error: "组件不存在" });
+  res
+    .type("application/zip")
+    .attachment(plugin.id + ".chatcomponent")
+    .send(await exportComponent(plugin, assets));
+});
+app.post(
+  "/api/components/import",
+  projectUpload.single("file"),
+  async (req, res) => {
+    if (!req.file) throw Error("请选择组件包");
+    res.json(await importComponent(req.file.buffer, assets, plugins));
+  },
+);
 app.post("/api/plugins", async (req, res) =>
   res.status(201).json(await plugins.install(req.body)),
 );

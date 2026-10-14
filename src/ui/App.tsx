@@ -54,9 +54,10 @@ import {
   type StylePlugin,
   type Message,
   type FieldValue,
+  type ComponentAction,
   projectSchema,
 } from "../core/model.js";
-import { PluginRegistry } from "../core/plugins.js";
+import { PluginRegistry, interpolate } from "../core/plugins.js";
 import { buildTimeline, audioEvents } from "../core/timeline.js";
 import { ChatRenderer } from "../core/renderer.js";
 import { History } from "../core/history.js";
@@ -80,6 +81,14 @@ import { OnlineMaterials } from "./OnlineMaterials.js";
 import { PhoneCustomizer } from "./PhoneCustomizer.js";
 import { assetName, assetCategory } from "../core/asset-names.js";
 import { MessageTypePicker, messageTypeDragMime } from "./MessageTypePicker.js";
+import { MentionInput } from "./MentionInput.js";
+import { GroupMembers } from "./GroupMembers.js";
+import {
+  changeMentionRanges,
+  componentButtons,
+  messageData,
+  componentText,
+} from "../core/interaction.js";
 import { TextCSSInput } from "./TextCSSInput.js";
 
 type ProjectSummary = {
@@ -554,6 +563,35 @@ export function App() {
     setMode("editor");
     return m.id;
   };
+  const recordInteraction = (
+    messageId: string,
+    nodeId: string,
+    actions: ComponentAction[],
+  ) => {
+    if (!project) return;
+    stop();
+    const index = project.messages.findIndex((m) => m.id === messageId),
+      base = timeline.events[index]!.atMs;
+    let recorded = Math.max(0, atMs - base);
+    change((p) => {
+      const message = p.messages.find((m) => m.id === messageId)!;
+      recorded = Math.max(
+        recorded,
+        ...(message.interactions ?? []).map((r) => r.atMs + 1),
+      );
+      message.interactions = [
+        ...(message.interactions ?? []),
+        {
+          id: uid(),
+          nodeId,
+          atMs: recorded,
+          actions: structuredClone(actions),
+        },
+      ];
+    });
+    setSelected(messageId);
+    setAtMs(base + recorded);
+  };
   const deleteMessage = () => {
     if (!selected || !project) return;
     const ids = multi.length ? multi : [selected],
@@ -809,6 +847,28 @@ export function App() {
     setAtMs(buildTimeline(current.current!).durationMs);
     notify(`已添加 ${parsed.length} 条消息`);
   };
+  async function importComponentFile(file: File) {
+    try {
+      if (/\.(zip|chatcomponent)$/i.test(file.name)) {
+        const body = new FormData();
+        body.append("file", file);
+        setPlugins(
+          await request<StylePlugin[]>("/api/components/import", {
+            method: "POST",
+            body,
+            signal: AbortSignal.timeout(120000),
+          }),
+        );
+        setAssets(await request<Asset[]>("/api/assets"));
+      } else {
+        await post("/api/plugins", JSON.parse(await file.text()));
+        setPlugins(await request<StylePlugin[]>("/api/plugins"));
+      }
+      notify("组件已安装");
+    } catch (error) {
+      notify((error as Error).message, "error");
+    }
+  }
   const customPlugins = [
     ...plugins.filter((p) => p.enabled),
     ...(project?.plugins.filter((p) => !plugins.some((g) => g.id === p.id)) ??
@@ -977,11 +1037,16 @@ export function App() {
                       (s) => s.id === message.speakerId,
                     )!;
                   const summary =
+                    interpolate(
+                      componentText(plugin.layout.nodes) ?? "",
+                      messageData(project, message),
+                    ) ||
                     Object.values(message.data).find(
                       (v) =>
                         typeof v === "string" &&
                         !/^(image|avatar|sticker|sound)-/.test(v),
-                    ) || plugin.name;
+                    ) ||
+                    plugin.name;
                   return (
                     <button
                       draggable
@@ -1191,6 +1256,22 @@ export function App() {
                     }}
                     onClick={(e) => {
                       if (poseDrag) return;
+                      const bounds = e.currentTarget.getBoundingClientRect(),
+                        hit = renderer.current?.interactionHitTest(
+                          ((e.clientX - bounds.left) / bounds.width) *
+                            e.currentTarget.width,
+                          ((e.clientY - bounds.top) / bounds.height) *
+                            e.currentTarget.height,
+                          e.currentTarget.width,
+                        );
+                      if (hit) {
+                        recordInteraction(
+                          hit.messageId,
+                          hit.nodeId,
+                          hit.actions,
+                        );
+                        return;
+                      }
                       const box = e.currentTarget.getBoundingClientRect(),
                         id = renderer.current?.hitTest(
                           ((e.clientX - box.left) / box.width) *
@@ -1389,6 +1470,14 @@ export function App() {
                               )!;
                               m.kind = plugin.id;
                               m.data = registry.defaults(plugin.id);
+                              for (const field of plugin.fields)
+                                if (
+                                  field.type === "speaker" &&
+                                  m.data[field.key] === null
+                                )
+                                  m.data[field.key] = m.speakerId;
+                              m.mentions = [];
+                              m.interactions = [];
                               const extra = plugins.find(
                                 (x) => x.id === plugin.id && !x.builtin,
                               );
@@ -1440,6 +1529,61 @@ export function App() {
                                       [field.key]: value,
                                     },
                                   })
+                                }
+                              />
+                            ) : field.type === "boolean" ? (
+                              <input
+                                type="checkbox"
+                                checked={Boolean(
+                                  selectedMessage.data[field.key],
+                                )}
+                                onChange={(e) =>
+                                  updateMessage({
+                                    data: {
+                                      ...selectedMessage.data,
+                                      [field.key]: e.target.checked,
+                                    },
+                                  })
+                                }
+                              />
+                            ) : field.type === "speaker" ? (
+                              <select
+                                value={String(
+                                  selectedMessage.data[field.key] ?? "",
+                                )}
+                                onChange={(e) =>
+                                  updateMessage({
+                                    data: {
+                                      ...selectedMessage.data,
+                                      [field.key]: e.target.value || null,
+                                    },
+                                  })
+                                }
+                              >
+                                <option value="">选择角色</option>
+                                {project.speakers.map((s) => (
+                                  <option value={s.id} key={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : ["text", "multiline"].includes(field.type) ? (
+                              <MentionInput
+                                message={selectedMessage}
+                                field={field.key}
+                                speakers={project.speakers}
+                                multiline={field.type === "multiline"}
+                                change={(text, refs) =>
+                                  updateMessage(
+                                    {
+                                      data: {
+                                        ...selectedMessage.data,
+                                        [field.key]: text,
+                                      },
+                                      mentions: refs,
+                                    },
+                                    "text" + selectedMessage.id + field.key,
+                                  )
                                 }
                               />
                             ) : field.type === "asset" ? (
@@ -1668,6 +1812,39 @@ export function App() {
                             />
                           </Field>
                         )}
+                      {project.appearance.ui?.messageTimeVisible && (
+                        <Field label="消息显示时间">
+                          <input
+                            placeholder={project.appearance.statusTime}
+                            value={selectedMessage.timeLabel ?? ""}
+                            onChange={(e) =>
+                              updateMessage({ timeLabel: e.target.value })
+                            }
+                          />
+                        </Field>
+                      )}
+                      {project.appearance.ui?.readCountVisible &&
+                        selectedMessage.speakerId === project.meId && (
+                          <Field label="已读人数">
+                            <input
+                              type="number"
+                              min={0}
+                              max={99999}
+                              value={selectedMessage.readCount ?? 1}
+                              onChange={(e) =>
+                                updateMessage({
+                                  readCount: Math.max(
+                                    0,
+                                    Math.min(
+                                      99999,
+                                      Math.round(Number(e.target.value)),
+                                    ),
+                                  ),
+                                })
+                              }
+                            />
+                          </Field>
+                        )}
                       <Field label="这条消息的音效">
                         <AssetSelect
                           assets={assets}
@@ -1677,6 +1854,77 @@ export function App() {
                           empty="跟随角色设置"
                         />
                       </Field>
+                      {!!componentButtons(
+                        registry.get(selectedMessage.kind).layout.nodes,
+                      ).length && (
+                        <details className="component-controls" open>
+                          <summary>组件操作</summary>
+                          <div className="phone-config-actions">
+                            {componentButtons(
+                              registry.get(selectedMessage.kind).layout.nodes,
+                            ).map((node) => {
+                              const data = messageData(
+                                  project,
+                                  selectedMessage,
+                                  atMs -
+                                    (timeline.events[
+                                      project.messages.findIndex(
+                                        (m) => m.id === selectedMessage.id,
+                                      )
+                                    ]?.atMs ?? 0),
+                                ),
+                                disabled =
+                                  !!node.disabledWhen &&
+                                  data[node.disabledWhen.field] ===
+                                    node.disabledWhen.equals;
+                              return (
+                                <button
+                                  className="button secondary"
+                                  key={node.id}
+                                  disabled={disabled}
+                                  onClick={() =>
+                                    recordInteraction(
+                                      selectedMessage.id,
+                                      node.id!,
+                                      node.actions!,
+                                    )
+                                  }
+                                >
+                                  {interpolate(node.text ?? "按钮", data)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
+                      {!!selectedMessage.interactions?.length && (
+                        <details className="interaction-records">
+                          <summary>
+                            已记录交互 · {selectedMessage.interactions.length}{" "}
+                            次
+                          </summary>
+                          {selectedMessage.interactions.map((record) => (
+                            <div key={record.id}>
+                              <span>
+                                {seconds(record.atMs)} · {record.nodeId}
+                              </span>
+                              <button
+                                className="text-button"
+                                onClick={() =>
+                                  updateMessage({
+                                    interactions:
+                                      selectedMessage.interactions!.filter(
+                                        (r) => r.id !== record.id,
+                                      ),
+                                  })
+                                }
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </details>
+                      )}
                       <div className="message-order">
                         <button
                           className="button secondary"
@@ -1753,8 +2001,8 @@ export function App() {
                       <Field label="显示人数">
                         <input
                           type="number"
-                          min={2}
-                          placeholder="按角色数量"
+                          min={0}
+                          placeholder="随群成员变化"
                           value={project.appearance.groupCount ?? ""}
                           onChange={(e) =>
                             setAppearance({
@@ -1766,6 +2014,18 @@ export function App() {
                         />
                       </Field>
                     )}
+                    {project.appearance.mode === "group" &&
+                      project.appearance.groupCount === null && (
+                        <GroupMembers
+                          project={project}
+                          atMs={atMs}
+                          change={(ids) =>
+                            change((p) => {
+                              p.group = { initialMemberIds: ids };
+                            })
+                          }
+                        />
+                      )}
                     <details>
                       <summary>位置与变换</summary>
                       <label className="check-row">
@@ -2323,24 +2583,10 @@ export function App() {
                     <input
                       hidden
                       type="file"
-                      accept=".json"
+                      accept=".json,.zip,.chatcomponent"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file)
-                          void file
-                            .text()
-                            .then((text) =>
-                              post<StylePlugin>(
-                                "/api/plugins",
-                                JSON.parse(text),
-                              ),
-                            )
-                            .then(() => request<StylePlugin[]>("/api/plugins"))
-                            .then((p) => {
-                              setPlugins(p);
-                              notify("样式已安装");
-                            })
-                            .catch((e) => notify(e.message, "error"));
+                        if (file) void importComponentFile(file);
                         e.target.value = "";
                       }}
                     />
@@ -2363,6 +2609,15 @@ export function App() {
                         <p>{plugin.description}</p>
                         <small>
                           {plugin.fields.length} 个编辑字段 · v{plugin.version}
+                          {!plugin.builtin && (
+                            <a
+                              className="text-button"
+                              href={"/api/components/" + plugin.id + "/package"}
+                              download
+                            >
+                              导出组件及素材
+                            </a>
+                          )}
                         </small>
                       </div>
                       <label className="switch">
