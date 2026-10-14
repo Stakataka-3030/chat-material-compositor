@@ -52,6 +52,8 @@ export interface Message {
   data: Record<string, FieldValue>;
   waitMs: number;
   typingMs: number;
+  enterAnimation?: "inherit" | "pop" | "none";
+  readDelayMs?: number;
   read: boolean;
   soundId: string | null;
 }
@@ -253,6 +255,8 @@ export const projectSchema: z.ZodType<Project> = z
           data: z.record(z.string(), value),
           waitMs: z.number().min(0).max(600000),
           typingMs: z.number().min(0).max(60000),
+          enterAnimation: z.enum(["inherit", "pop", "none"]).optional(),
+          readDelayMs: z.number().min(0).max(60000).optional(),
           read: z.boolean(),
           soundId: id.nullable(),
         }),
@@ -416,6 +420,8 @@ export function createMessage(speakerId: string, plugin: StylePlugin): Message {
     data: Object.fromEntries(plugin.fields.map((f) => [f.key, f.default])),
     waitMs: 800,
     typingMs: 0,
+    enterAnimation: plugin.layout.variant === "separator" ? "none" : "inherit",
+    readDelayMs: 500,
     read: true,
     soundId: null,
   };

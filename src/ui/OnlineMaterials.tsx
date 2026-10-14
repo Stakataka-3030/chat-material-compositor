@@ -53,6 +53,14 @@ export function OnlineMaterials({
   const [sources, setSources] = useState<MaterialSources>(defaultSources),
     [settingsOpen, setSettingsOpen] = useState(false);
   const source = sources.sources.find((s) => s.id === sources.selectedId)!;
+  const canBrowse =
+    kind !== "sound" ||
+    source.type !== "moenotes" ||
+    new URL(source.url).hostname !== "assets.bdon.moe";
+  const pageFiles =
+    page?.files.filter(
+      (item) => item.kind === (kind === "sound" ? "sound" : "image"),
+    ) ?? [];
   useEffect(() => {
     void request<MaterialSources>("/api/materials/sources")
       .then(setSources)
@@ -113,9 +121,61 @@ export function OnlineMaterials({
       setDownloading("");
     }
   }
+  function sourceDialog() {
+    return (
+      settingsOpen && (
+        <SourceSettings
+          value={sources}
+          close={() => setSettingsOpen(false)}
+          saved={(v) => {
+            generation.current++;
+            setSources(v);
+            setPage(null);
+            setError("");
+            setBusy(false);
+            setHistory([0]);
+            setPageIndex(0);
+            if (v.sources.find((s) => s.id === v.selectedId)?.type === "json")
+              setQuery("");
+          }}
+        />
+      )
+    );
+  }
+  if (!canBrowse)
+    return (
+      <details className="online-materials">
+        <summary>导入在线音频</summary>
+        <div className="online-search">
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="HTTP(S) 音频文件地址"
+            aria-label="素材直链"
+          />
+          <button
+            className="button secondary"
+            disabled={Boolean(downloading) || !url.trim()}
+            onClick={() => void importFile({ url: url.trim(), name: "" })}
+          >
+            导入音频
+          </button>
+          <button className="text-button" onClick={() => setSettingsOpen(true)}>
+            来源设置
+          </button>
+        </div>
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
+        {sourceDialog()}
+      </details>
+    );
   return (
     <details className="online-materials">
-      <summary>在线素材</summary>
+      <summary>{kind === "sound" ? "在线音效" : "在线素材"}</summary>
       <p>
         您可以从在线素材源选择并导入素材。素材会保存到本机，也可以导出为素材包。
       </p>
@@ -140,24 +200,28 @@ export function OnlineMaterials({
         )}
       </p>
       <div className="online-search">
-        <input
-          type="text"
-          aria-label="在线素材关键词"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void search();
-          }}
-          placeholder="搜索角色英文名或文件名"
-        />
-        <button
-          className="button secondary"
-          disabled={busy}
-          onClick={() => void search()}
-        >
-          <Search size={15} />
-          {busy ? "查询中…" : "搜索"}
-        </button>
+        {canBrowse && (
+          <>
+            <input
+              type="text"
+              aria-label="在线素材关键词"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void search();
+              }}
+              placeholder="搜索角色英文名或文件名"
+            />
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => void search()}
+            >
+              <Search size={15} />
+              {busy ? "查询中…" : "搜索"}
+            </button>
+          </>
+        )}
         <a
           href={source.site || source.url}
           target="_blank"
@@ -179,7 +243,7 @@ export function OnlineMaterials({
       {page && (
         <>
           <div className="online-results">
-            {page.files.map((item) => (
+            {pageFiles.map((item) => (
               <article key={item.path}>
                 {item.kind === "image" ? (
                   <MaterialThumbnail key={item.url} item={item} />
@@ -211,7 +275,7 @@ export function OnlineMaterials({
               </article>
             ))}
           </div>
-          {!page.files.length && (
+          {!pageFiles.length && (
             <p className="muted">
               当前页没有可直接下载的素材，可以换关键词或查看下一页。
             </p>
@@ -254,23 +318,7 @@ export function OnlineMaterials({
           </button>
         </div>
       </details>
-      {settingsOpen && (
-        <SourceSettings
-          value={sources}
-          close={() => setSettingsOpen(false)}
-          saved={(v) => {
-            generation.current++;
-            setSources(v);
-            setPage(null);
-            setError("");
-            setBusy(false);
-            setHistory([0]);
-            setPageIndex(0);
-            if (v.sources.find((s) => s.id === v.selectedId)?.type === "json")
-              setQuery("");
-          }}
-        />
-      )}
+      {sourceDialog()}
     </details>
   );
 }

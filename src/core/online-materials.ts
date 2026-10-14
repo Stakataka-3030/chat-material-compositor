@@ -27,7 +27,7 @@ export const sourceKeywords: Partial<Record<AssetKind, string>> = {
   wallpaper: "back.png",
   avatar: "icon",
   sticker: "stamp",
-  sound: "Cri/Sound/SE",
+  sound: "",
   icon: "Adv/Chat/UI",
   "bar-background": "Adv/Chat/UI",
 };

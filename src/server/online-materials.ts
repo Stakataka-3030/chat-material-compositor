@@ -144,7 +144,11 @@ export class OnlineMaterialService {
                 decodeURIComponent(url.pathname.split("/").at(-1) || "素材"),
             ),
             kind:
-              item.kind === "sound" ? ("sound" as const) : ("image" as const),
+              item.kind === "sound" ||
+              item.kind === "audio" ||
+              /\.(wav|mp3|ogg|m4a|flac|aac)$/i.test(url.pathname)
+                ? ("sound" as const)
+                : ("image" as const),
           };
         })
         .filter((item) =>

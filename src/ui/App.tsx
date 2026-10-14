@@ -79,6 +79,7 @@ import { MaterialPacks } from "./MaterialPacks.js";
 import { OnlineMaterials } from "./OnlineMaterials.js";
 import { PhoneCustomizer } from "./PhoneCustomizer.js";
 import { assetName, assetCategory } from "../core/asset-names.js";
+import { MessageTypePicker, messageTypeDragMime } from "./MessageTypePicker.js";
 import { TextCSSInput } from "./TextCSSInput.js";
 
 type ProjectSummary = {
@@ -159,6 +160,15 @@ export function App() {
     [deleteRole, setDeleteRole] = useState<string | null>(null),
     [replacementRole, setReplacementRole] = useState(""),
     [multi, setMulti] = useState<string[]>([]);
+  const [lastAddKind, setLastAddKind] = useState(() => {
+      try {
+        return localStorage.getItem("liaomu-last-add-kind") || "text";
+      } catch {
+        return "text";
+      }
+    }),
+    [dragType, setDragType] = useState<string | null>(null),
+    [dropIndex, setDropIndex] = useState<number | null>(null);
   const [assetPreview, setAssetPreview] = useState<Asset | null>(null);
   const history = useRef(new History<Project>()),
     current = useRef<Project | null>(null),
@@ -207,6 +217,7 @@ export function App() {
     void request<Bootstrap>("/api/bootstrap")
       .then(async (data) => {
         setClientToken(data.clientToken);
+        void post("/api/launcher/browser-ready", {}).catch(() => {});
         setAssets(data.assets);
         setPlugins(data.plugins);
         setProjects(data.projects);
@@ -503,7 +514,7 @@ export function App() {
         (timeline.events[index]?.atMs ?? 0) + (project?.playback.popMs ?? 0),
       );
   };
-  const addMessage = (kind = "text") => {
+  const addMessage = (kind = "text", insertIndex?: number) => {
     if (!project) return;
     if (plugins.find((p) => p.id === kind)?.enabled === false) {
       notify("请先在样式页启用该消息类型", "info");
@@ -519,11 +530,24 @@ export function App() {
       const index = selected
         ? p.messages.findIndex((m) => m.id === selected) + 1
         : p.messages.length;
-      p.messages.splice(index, 0, m);
+      p.messages.splice(
+        insertIndex === undefined
+          ? index
+          : Math.max(0, Math.min(p.messages.length, insertIndex)),
+        0,
+        m,
+      );
       const custom = plugins.find((x) => x.id === kind && !x.builtin);
       if (custom && !p.plugins.some((x) => x.id === kind))
         p.plugins.push(custom);
     });
+    setLastAddKind(kind);
+    try {
+      localStorage.setItem("liaomu-last-add-kind", kind);
+    } catch {}
+    setDragType(null);
+    setDropIndex(null);
+    setMulti([]);
     setSelected(m.id);
     setPane("message");
     setAtMs(buildTimeline(current.current!).durationMs);
@@ -922,7 +946,31 @@ export function App() {
                   <FileText size={18} />
                 </button>
               </div>
-              <div className="message-list">
+              <div
+                className="message-list"
+                onDragOver={(e) => {
+                  if (
+                    dragType ||
+                    e.dataTransfer.types.includes(messageTypeDragMime)
+                  ) {
+                    e.preventDefault();
+                    setDropIndex(project.messages.length);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node))
+                    setDropIndex(null);
+                }}
+                onDrop={(e) => {
+                  const kind =
+                    e.dataTransfer.getData(messageTypeDragMime) || dragType;
+                  if (kind && customPlugins.some((p) => p.id === kind)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    addMessage(kind, project.messages.length);
+                  }
+                }}
+              >
                 {project.messages.map((message, index) => {
                   const plugin = registry.get(message.kind),
                     speaker = project.speakers.find(
@@ -940,6 +988,11 @@ export function App() {
                       key={message.id}
                       className={
                         "message-item " +
+                        (dragType && dropIndex === index
+                          ? "drop-before "
+                          : dragType && dropIndex === index + 1
+                            ? "drop-after "
+                            : "") +
                         (selected === message.id || multi.includes(message.id)
                           ? "selected"
                           : "")
@@ -951,11 +1004,48 @@ export function App() {
                           e.ctrlKey || e.metaKey,
                         )
                       }
-                      onDragStart={() => setDrag(message.id)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => {
-                        if (drag) dropMessages(drag, message.id);
+                      onDragStart={(e) => {
+                        setDrag(message.id);
+                        e.dataTransfer.setData(
+                          "application/x-chat-message-id",
+                          message.id,
+                        );
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragEnd={() => {
                         setDrag(null);
+                        setDropIndex(null);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (
+                          dragType ||
+                          e.dataTransfer.types.includes(messageTypeDragMime)
+                        ) {
+                          const box = e.currentTarget.getBoundingClientRect();
+                          setDropIndex(
+                            index +
+                              (e.clientY >= box.top + box.height / 2 ? 1 : 0),
+                          );
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const kind =
+                          e.dataTransfer.getData(messageTypeDragMime) ||
+                          dragType;
+                        if (kind && customPlugins.some((p) => p.id === kind)) {
+                          const box = e.currentTarget.getBoundingClientRect();
+                          addMessage(
+                            kind,
+                            index +
+                              (e.clientY >= box.top + box.height / 2 ? 1 : 0),
+                          );
+                        } else if (drag) dropMessages(drag, message.id);
+                        setDrag(null);
+                        setDropIndex(null);
                       }}
                     >
                       <span className="message-number">
@@ -986,27 +1076,15 @@ export function App() {
                 )}
               </div>
               <div className="add-message">
-                <button
-                  className="button secondary"
-                  onClick={() => addMessage()}
-                >
-                  <Plus size={16} />
-                  添加消息
-                </button>
-                <select
-                  aria-label="添加其他消息"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) addMessage(e.target.value);
+                <MessageTypePicker
+                  types={customPlugins}
+                  lastKind={lastAddKind}
+                  add={(kind) => addMessage(kind)}
+                  dragging={(kind) => {
+                    setDragType(kind);
+                    if (!kind) setDropIndex(null);
                   }}
-                >
-                  <option value="">其他类型</option>
-                  {customPlugins.map((p) => (
-                    <option value={p.id} key={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             </aside>
             <main className="preview-panel">
@@ -1041,6 +1119,34 @@ export function App() {
                   style={{ transform: `scale(${zoom})` }}
                 >
                   <canvas
+                    onDragOver={(e) => {
+                      if (
+                        dragType ||
+                        e.dataTransfer.types.includes(messageTypeDragMime)
+                      )
+                        e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      const kind =
+                        e.dataTransfer.getData(messageTypeDragMime) || dragType;
+                      if (!kind || !customPlugins.some((p) => p.id === kind))
+                        return;
+                      e.preventDefault();
+                      const box = e.currentTarget.getBoundingClientRect(),
+                        id = renderer.current?.hitTest(
+                          ((e.clientX - box.left) / box.width) *
+                            e.currentTarget.width,
+                          ((e.clientY - box.top) / box.height) *
+                            e.currentTarget.height,
+                          e.currentTarget.width,
+                        );
+                      addMessage(
+                        kind,
+                        id
+                          ? project.messages.findIndex((m) => m.id === id) + 1
+                          : project.messages.length,
+                      );
+                    }}
                     ref={canvas}
                     aria-label="手机聊天画面"
                     onPointerDown={(e) => {
@@ -1501,6 +1607,30 @@ export function App() {
                           />
                         </Field>
                       </div>
+                      <Field label="出现动画">
+                        <select
+                          aria-label="出现动画"
+                          value={
+                            selectedMessage.enterAnimation ??
+                            (registry.get(selectedMessage.kind).layout
+                              .variant === "separator"
+                              ? "none"
+                              : "inherit")
+                          }
+                          onChange={(e) =>
+                            updateMessage({
+                              enterAnimation: e.target.value as
+                                | "inherit"
+                                | "pop"
+                                | "none",
+                            })
+                          }
+                        >
+                          <option value="inherit">跟随全局</option>
+                          <option value="pop">弹出</option>
+                          <option value="none">直接显示</option>
+                        </select>
+                      </Field>
                       <label className="check-row">
                         <input
                           type="checkbox"
@@ -1511,6 +1641,33 @@ export function App() {
                         />
                         已读
                       </label>
+                      {selectedMessage.read &&
+                        selectedMessage.speakerId === project.meId &&
+                        selectedMessage.kind !== "separator" && (
+                          <Field label="已读延迟（秒）">
+                            <input
+                              aria-label="已读延迟（秒）"
+                              type="number"
+                              min={0}
+                              max={60}
+                              step={0.1}
+                              value={
+                                (selectedMessage.readDelayMs ?? 500) / 1000
+                              }
+                              onChange={(e) =>
+                                updateMessage({
+                                  readDelayMs: Math.max(
+                                    0,
+                                    Math.min(
+                                      60000,
+                                      Number(e.target.value) * 1000,
+                                    ),
+                                  ),
+                                })
+                              }
+                            />
+                          </Field>
+                        )}
                       <Field label="这条消息的音效">
                         <AssetSelect
                           assets={assets}
@@ -2102,6 +2259,16 @@ export function App() {
                             : size(asset.bytes)}{" "}
                           · {asset.builtin ? "内置" : "已导入"}
                         </small>
+                        {asset.kind === "sound" && (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <audio
+                              className="asset-sound-preview"
+                              controls
+                              preload="none"
+                              src={"/api/assets/file/" + asset.id}
+                            />
+                          </div>
+                        )}
                         <div className="tile-actions">
                           <button
                             className="text-button"

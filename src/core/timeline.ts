@@ -11,6 +11,26 @@ export interface Timeline {
   durationMs: number;
   messagesEndMs: number;
 }
+function separator(project: Project, message: Message) {
+  return (
+    message.kind === "separator" ||
+    project.plugins.some(
+      (p) => p.id === message.kind && p.layout.variant === "separator",
+    )
+  );
+}
+export function messageAnimationMs(project: Project, message: Message) {
+  const mode =
+    message.enterAnimation ??
+    (separator(project, message) ? "none" : "inherit");
+  return mode === "none"
+    ? 0
+    : mode === "pop"
+      ? project.playback.popMs || 180
+      : project.playback.popMs;
+}
+export const messageReadDelayMs = (message: Message) =>
+  message.readDelayMs ?? 500;
 export function buildTimeline(project: Project): Timeline {
   let cursor = project.playback.leadMs;
   const events = project.messages.map((m, index) => {
@@ -22,7 +42,7 @@ export function buildTimeline(project: Project): Timeline {
       index,
       atMs: cursor,
       typingStartMs,
-      endMs: cursor + project.playback.popMs,
+      endMs: cursor + messageAnimationMs(project, m),
     };
     return event;
   });
@@ -35,6 +55,19 @@ export function buildTimeline(project: Project): Timeline {
     cursor,
     ...events.map((e) => e.endMs),
     ...voiceEnds,
+    ...project.messages.flatMap((m, i) =>
+      project.appearance.showRead &&
+      project.appearance.ui?.readText !== "" &&
+      m.read &&
+      m.speakerId === project.meId &&
+      !separator(project, m)
+        ? [
+            events[i]!.atMs +
+              messageReadDelayMs(m) +
+              Math.max(100, 1000 / project.output.fps),
+          ]
+        : [],
+    ),
     0,
   );
   return {

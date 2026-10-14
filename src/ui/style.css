@@ -406,20 +406,90 @@ input[type="color"] {
   color: #687568;
 }
 .add-message {
+  position: relative;
   padding: 13px 15px;
   border-top: 1px solid var(--border);
   display: flex;
   gap: 7px;
   background: #fdfefb;
 }
-.add-message > .button {
+.message-type-picker {
+  display: flex;
+  width: 100%;
+  gap: 0;
+}
+.add-quick {
   flex: 1;
+  min-width: 0;
+  justify-content: center;
+  border-radius: 8px 0 0 8px;
+}
+.add-quick span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.add-type-toggle {
+  border-radius: 0 8px 8px 0;
+  border-left: 0;
   padding: 8px;
 }
-.add-message > select {
-  width: 95px;
-  font-size: 11px;
-  padding: 7px 5px;
+.message-type-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 10px;
+  right: 10px;
+  z-index: 40;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px #1e3c2824;
+  max-height: min(440px, 65vh);
+  overflow: auto;
+}
+.message-type-menu strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.message-type-menu small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 8px;
+}
+.message-type-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 8px;
+}
+.message-type-options button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: grab;
+}
+.message-type-options button svg {
+  flex-shrink: 0;
+}
+.message-type-options button:hover,
+.message-type-options button.active {
+  background: var(--green-soft);
+}
+.message-item.drop-before {
+  box-shadow: 0 -3px 0 var(--green);
+}
+.message-item.drop-after {
+  box-shadow: 0 3px 0 var(--green);
 }
 .preview-panel {
   display: flex;
@@ -1667,6 +1737,11 @@ progress {
 .online-results audio {
   width: 100%;
   margin-bottom: 12px;
+}
+.asset-sound-preview {
+  width: 100%;
+  height: 32px;
+  margin-top: 8px;
 }
 .asset-preview {
   display: flex;

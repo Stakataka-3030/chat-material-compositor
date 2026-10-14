@@ -26,12 +26,14 @@ import { OnlineMaterialService } from "./online-materials.js";
 import { exportMaterialPack, importMaterialPack } from "./material-packs.js";
 import { exportPhoneConfig, importPhoneConfig } from "./phone-config.js";
 import { appearancePresets } from "../core/appearance-presets.js";
+import { installBuiltinSounds } from "./builtin-sounds.js";
 const app = express(),
   server = http.createServer(app),
   clientToken = randomUUID();
 const assets = new AssetStore(),
   projects = new ProjectStore(),
   plugins = new PluginStore();
+let browserReadyAt = 0;
 const sessions = new Map<
   string,
   { project: Project; assets: ReturnType<AssetStore["list"]> }
@@ -85,8 +87,18 @@ app.get("/api/bootstrap", async (_req, res) =>
 );
 app.get("/api/updates", async (_req, res) => res.json(await updates.status()));
 app.get("/api/launcher", (_req, res) =>
-  res.json({ app: "聊天素材合成器", version: APP_VERSION, clientToken }),
+  res.json({
+    app: "聊天素材合成器",
+    appId: "chat-material-compositor",
+    version: APP_VERSION,
+    clientToken,
+    browserReadyAt,
+  }),
 );
+app.post("/api/launcher/browser-ready", (_req, res) => {
+  browserReadyAt = Date.now();
+  res.json({ ok: true });
+});
 app.post("/api/updates/check", async (req, res) =>
   res.json(
     await updates.check(z.boolean().optional().parse(req.body.force) ?? false),
@@ -352,6 +364,7 @@ async function start() {
   await acquireInstance();
   await fs.mkdir(DATA, { recursive: true });
   await assets.init();
+  await installBuiltinSounds(assets);
   await plugins.init();
   await projects.init(assets);
   const built = await fs

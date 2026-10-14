@@ -138,6 +138,46 @@ export class AssetStore {
   list() {
     return [...this.assets.values()];
   }
+  async registerGeneratedSound(
+    content: Buffer,
+    name: string,
+    durationMs: number,
+    tags: string[],
+  ) {
+    return this.writer.run(async () => {
+      const hash = digest(content),
+        id = "sound-" + hash.slice(0, 24);
+      const current =
+        this.assets.get(id) ??
+        this.list().find(
+          (a) =>
+            a.builtin &&
+            a.kind === "sound" &&
+            a.tags.includes("generated-v1") &&
+            tags.some(
+              (tag) => tag.startsWith("builtin-") && a.tags.includes(tag),
+            ),
+        );
+      if (current) return current;
+      const folder = path.join(this.locations.data, "assets");
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, hash + ".wav"), content);
+      const asset: Asset = {
+        id,
+        name,
+        kind: "sound",
+        file: "data/assets/" + hash + ".wav",
+        mime: "audio/wav",
+        bytes: content.length,
+        durationMs,
+        tags: [...tags, "generated-v1"],
+        builtin: true,
+      };
+      this.assets.set(id, asset);
+      await this.persist(false);
+      return asset;
+    });
+  }
   get(id: string) {
     const a = this.assets.get(id);
     if (!a) throw new Error(`素材不存在：${id}`);
@@ -349,7 +389,7 @@ export class AssetStore {
         }
       }
       await atomicJson(path.join(this.locations.data, "assets.json"), [
-        ...this.list().filter((a) => !a.builtin),
+        ...this.list().filter((a) => a.file.startsWith("data/assets/")),
         ...added,
       ]);
       added.forEach((a) => this.assets.set(a.id, a));
@@ -361,7 +401,11 @@ export class AssetStore {
       builtin
         ? path.join(this.locations.root, "resources/manifest.json")
         : path.join(this.locations.data, "assets.json"),
-      this.list().filter((a) => Boolean(a.builtin) === builtin),
+      this.list().filter((a) =>
+        builtin
+          ? a.builtin && a.file.startsWith("resources/")
+          : a.file.startsWith("data/assets/"),
+      ),
     );
   }
 }

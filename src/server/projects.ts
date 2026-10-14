@@ -48,9 +48,12 @@ export class ProjectStore {
         null;
       p.audio.receiveSoundId =
         all.find((a) => a.kind === "sound" && a.name.startsWith("receive1"))
-          ?.id ?? null;
+          ?.id ??
+        all.find((a) => a.tags.includes("builtin-receive"))?.id ??
+        null;
       p.audio.sendSoundId =
         all.find((a) => a.kind === "sound" && a.name.startsWith("send1"))?.id ??
+        all.find((a) => a.tags.includes("builtin-send"))?.id ??
         null;
       const messages: {
         who: number;

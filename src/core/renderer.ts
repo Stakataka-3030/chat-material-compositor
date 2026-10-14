@@ -12,6 +12,8 @@ import {
   buildTimeline,
   easeOut,
   easeSmooth,
+  messageAnimationMs,
+  messageReadDelayMs,
   type Timeline,
 } from "./timeline.js";
 
@@ -1303,10 +1305,8 @@ export class ChatRenderer {
         : block.own
           ? width - offset - block.width
           : offset;
-      const progress =
-        all || !this.project.playback.popMs
-          ? 1
-          : easeOut((atMs - event.atMs) / this.project.playback.popMs);
+      const popMs = messageAnimationMs(this.project, block.message);
+      const progress = all || !popMs ? 1 : easeOut((atMs - event.atMs) / popMs);
       const scale = 0.82 + 0.18 * progress;
       const anchorX = separator ? width / 2 : block.own ? x + block.width : x,
         anchorY =
@@ -1410,6 +1410,7 @@ export class ChatRenderer {
         this.project.appearance.showRead &&
         block.own &&
         block.message.read &&
+        (all || atMs >= event.atMs + messageReadDelayMs(block.message)) &&
         !separator
       ) {
         ctx.font = this.font(this.ui.readSize);

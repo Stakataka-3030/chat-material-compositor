@@ -143,26 +143,36 @@ export function AssetSelect({
 }) {
   const kinds = Array.isArray(kind) ? kind : [kind];
   return (
-    <select
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value || null)}
-    >
-      <option value="">{empty}</option>
-      {value &&
-        assets.find(
-          (a) => a.id === value && !kinds.includes(assetCategory(a)),
-        ) && (
-          <option value={value}>
-            原配置：{assetName(assets.find((a) => a.id === value)!)}
-          </option>
-        )}
-      {assets
-        .filter((a) => kinds.includes(assetCategory(a)))
-        .map((a) => (
-          <option key={a.id} value={a.id}>
-            {assetName(a)}
-          </option>
-        ))}
-    </select>
+    <>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        <option value="">{empty}</option>
+        {value &&
+          assets.find(
+            (a) => a.id === value && !kinds.includes(assetCategory(a)),
+          ) && (
+            <option value={value}>
+              原配置：{assetName(assets.find((a) => a.id === value)!)}
+            </option>
+          )}
+        {assets
+          .filter((a) => kinds.includes(assetCategory(a)))
+          .map((a) => (
+            <option key={a.id} value={a.id}>
+              {assetName(a)}
+            </option>
+          ))}
+      </select>
+      {kinds.includes("sound") && value && (
+        <audio
+          className="asset-sound-preview"
+          controls
+          preload="none"
+          src={"/api/assets/file/" + value}
+        />
+      )}
+    </>
   );
 }
